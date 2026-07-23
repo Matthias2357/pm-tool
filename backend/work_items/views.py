@@ -15,7 +15,7 @@ class EpicViewSet(ModelViewSet):
 
 
 class TicketViewSet(ModelViewSet):
-    queryset = Ticket.objects.select_related("project", "phase", "epic").all()
+    queryset = Ticket.objects.select_related("project", "phase", "epic", "responsible_team").all()
     serializer_class = TicketSerializer
 
     def get_queryset(self):

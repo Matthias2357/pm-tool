@@ -67,6 +67,15 @@ class TicketApiTests(APITestCase):
         ticket.refresh_from_db()
         self.assertEqual(ticket.phase_id, self.phase.id)
 
+    def test_deleting_phase_keeps_ticket_without_phase(self):
+        ticket = Ticket.objects.create(project=self.project, phase=self.phase, title="Bleibt erhalten")
+
+        response = self.client.delete(f"/api/phases/{self.phase.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        ticket.refresh_from_db()
+        self.assertIsNone(ticket.phase_id)
+
     def test_personal_methodology_priority_is_returned(self):
         ticket = Ticket.objects.create(
             project=self.project,

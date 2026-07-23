@@ -21,6 +21,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "core",
     "projects",
+    "teams",
     "work_items",
     "documents",
     "meetings",

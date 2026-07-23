@@ -2,6 +2,7 @@ from django.db import models
 
 from core.models import TimeStampedModel
 from projects.models import Phase, Project
+from teams.models import SubTeam
 
 
 class Epic(TimeStampedModel):
@@ -30,6 +31,13 @@ class Ticket(TimeStampedModel):
     project = models.ForeignKey(Project, related_name="tickets", on_delete=models.CASCADE)
     phase = models.ForeignKey(Phase, related_name="tickets", null=True, blank=True, on_delete=models.SET_NULL)
     epic = models.ForeignKey(Epic, related_name="tickets", null=True, blank=True, on_delete=models.SET_NULL)
+    responsible_team = models.ForeignKey(
+        SubTeam,
+        related_name="tickets",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.BACKLOG)

@@ -7,6 +7,7 @@ from rest_framework.routers import DefaultRouter
 from documents.views import DocumentBlockViewSet, DocumentEntryViewSet, DocumentViewSet, EditableNoteViewSet
 from meetings.views import MeetingViewSet
 from projects.views import PhaseViewSet, ProjectViewSet
+from teams.views import SubTeamViewSet, TeamMemberViewSet
 from work_items.views import EpicViewSet, MindMapEdgeViewSet, MindMapNodeViewSet, TicketViewSet
 
 
@@ -15,6 +16,8 @@ router.register("projects", ProjectViewSet)
 router.register("phases", PhaseViewSet)
 router.register("epics", EpicViewSet)
 router.register("tickets", TicketViewSet)
+router.register("team-members", TeamMemberViewSet)
+router.register("subteams", SubTeamViewSet)
 router.register("mindmap-nodes", MindMapNodeViewSet)
 router.register("mindmap-edges", MindMapEdgeViewSet)
 router.register("documents", DocumentViewSet)

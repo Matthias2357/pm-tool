@@ -27,6 +27,8 @@ import {
   Plus,
   Settings,
   Upload,
+  UserRound,
+  Users,
   X,
   ZoomIn,
   ZoomOut,
@@ -37,7 +39,7 @@ import "./styles.css";
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(/\/$/, "");
 const noteRenderer = new MarkdownIt({ breaks: true, linkify: true, typographer: true }).use(markdownItKatex);
 
-type View = "dashboard" | "kanban" | "timeline" | "mindmap" | "methodology" | "documents";
+type View = "dashboard" | "kanban" | "timeline" | "mindmap" | "methodology" | "documents" | "team";
 type TicketStatus = "backlog" | "todo" | "in_progress" | "review" | "done";
 type Criticality = "normal" | "warning" | "critical";
 
@@ -67,6 +69,26 @@ interface Epic {
   progress: number;
 }
 
+interface TeamMember {
+  id: number;
+  project: number;
+  last_name: string;
+  first_name: string;
+  full_name: string;
+  role: string;
+  email: string;
+  subteam_ids: number[];
+}
+
+interface SubTeam {
+  id: number;
+  project: number;
+  name: string;
+  description: string;
+  members: number[];
+  member_details: TeamMember[];
+}
+
 interface Ticket {
   id: number;
   project: number;
@@ -74,6 +96,8 @@ interface Ticket {
   phase_name: string | null;
   epic: number | null;
   epic_title: string | null;
+  responsible_team: number | null;
+  responsible_team_name: string | null;
   title: string;
   description: string;
   status: TicketStatus;
@@ -94,6 +118,7 @@ interface TicketDraft {
   status: TicketStatus;
   phase: string;
   epic: string;
+  responsible_team: string;
   due_on: string;
   starts_on: string;
   importance: number;
@@ -155,6 +180,7 @@ const emptyTicket: TicketDraft = {
   status: "backlog",
   phase: "",
   epic: "",
+  responsible_team: "",
   due_on: "",
   starts_on: "",
   importance: -1,
@@ -177,6 +203,7 @@ const navigation: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "timeline", label: "Timeline", icon: CalendarDays },
   { id: "mindmap", label: "Mind-Map", icon: GitBranch },
   { id: "methodology", label: "Methodik", icon: ListChecks },
+  { id: "team", label: "Team", icon: Users },
   { id: "documents", label: "Dokumente", icon: FileText },
 ];
 
@@ -205,6 +232,8 @@ function App() {
   const [projectId, setProjectId] = useState<number | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [epics, setEpics] = useState<Epic[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [subteams, setSubteams] = useState<SubTeam[]>([]);
   const [documentBlocks, setDocumentBlocks] = useState<DocumentBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -222,6 +251,10 @@ function App() {
   const [noteEditor, setNoteEditor] = useState<NoteEditorState | null>(null);
   const [phaseDialog, setPhaseDialog] = useState<Phase | "new" | null>(null);
   const [epicDialog, setEpicDialog] = useState<Epic | "new" | null>(null);
+  const [memberDialog, setMemberDialog] = useState<TeamMember | "new" | null>(null);
+  const [subteamDialog, setSubteamDialog] = useState<SubTeam | "new" | null>(null);
+  const createNextTicketRef = useRef(false);
+  const ticketTitleRef = useRef<HTMLInputElement>(null);
 
   const project = projects.find((item) => item.id === projectId) ?? null;
 
@@ -233,14 +266,18 @@ function App() {
   }, []);
 
   const loadBoard = useCallback(async (selectedProject: number) => {
-    const [ticketData, epicData, blockData] = await Promise.all([
+    const [ticketData, epicData, blockData, memberData, subteamData] = await Promise.all([
       api<Ticket[] | { results: Ticket[] }>(`/tickets/?project=${selectedProject}`),
       api<Epic[] | { results: Epic[] }>(`/epics/?project=${selectedProject}`),
       api<DocumentBlock[] | { results: DocumentBlock[] }>(`/document-blocks/?project=${selectedProject}`),
+      api<TeamMember[] | { results: TeamMember[] }>(`/team-members/?project=${selectedProject}`),
+      api<SubTeam[] | { results: SubTeam[] }>(`/subteams/?project=${selectedProject}`),
     ]);
     setTickets(unpack(ticketData));
     setEpics(unpack(epicData));
     setDocumentBlocks(unpack(blockData));
+    setTeamMembers(unpack(memberData));
+    setSubteams(unpack(subteamData));
   }, []);
 
   useEffect(() => {
@@ -254,6 +291,8 @@ function App() {
     if (!projectId) {
       setTickets([]);
       setEpics([]);
+      setTeamMembers([]);
+      setSubteams([]);
       return;
     }
     setLoading(true);
@@ -304,12 +343,14 @@ function App() {
   }
 
   function openNewTicket(status: TicketStatus = "backlog", epic: Epic | null = null) {
+    createNextTicketRef.current = false;
     setEditingTicket(null);
     setTicketDraft({ ...emptyTicket, status, epic: epic?.id.toString() ?? "" });
     setTicketDialog(true);
   }
 
   function openTicket(ticket: Ticket) {
+    createNextTicketRef.current = false;
     setEditingTicket(ticket);
     setTicketDraft({
       title: ticket.title,
@@ -317,6 +358,7 @@ function App() {
       status: ticket.status,
       phase: ticket.phase?.toString() ?? "",
       epic: ticket.epic?.toString() ?? "",
+      responsible_team: ticket.responsible_team?.toString() ?? "",
       due_on: ticket.due_on ?? "",
       starts_on: ticket.starts_on ?? "",
       importance: ticket.importance,
@@ -335,6 +377,7 @@ function App() {
       project: projectId,
       phase: ticketDraft.phase ? Number(ticketDraft.phase) : null,
       epic: ticketDraft.epic ? Number(ticketDraft.epic) : null,
+      responsible_team: ticketDraft.responsible_team ? Number(ticketDraft.responsible_team) : null,
       due_on: ticketDraft.due_on || null,
       starts_on: ticketDraft.starts_on || null,
     };
@@ -345,7 +388,14 @@ function App() {
         body: JSON.stringify(payload),
       });
       await loadBoard(projectId);
-      setTicketDialog(false);
+      if (!editingTicket && createNextTicketRef.current) {
+        createNextTicketRef.current = false;
+        setTicketDraft({ ...emptyTicket, epic: ticketDraft.epic });
+        setEditingTicket(null);
+        window.requestAnimationFrame(() => ticketTitleRef.current?.focus());
+      } else {
+        setTicketDialog(false);
+      }
     } catch (reason) {
       setError((reason as Error).message);
     }
@@ -400,6 +450,75 @@ function App() {
       await api<void>(`/epics/${epicDialog.id}/`, { method: "DELETE" });
       await loadBoard(projectId);
       setEpicDialog(null);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  async function saveTeamMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!projectId || !memberDialog) return;
+    const form = new FormData(event.currentTarget);
+    const existing = memberDialog === "new" ? null : memberDialog;
+    try {
+      await api<TeamMember>(existing ? `/team-members/${existing.id}/` : "/team-members/", {
+        method: existing ? "PATCH" : "POST",
+        body: JSON.stringify({
+          project: projectId,
+          last_name: form.get("last_name"),
+          first_name: form.get("first_name"),
+          role: form.get("role"),
+          email: form.get("email"),
+        }),
+      });
+      await loadBoard(projectId);
+      setMemberDialog(null);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  async function deleteTeamMember() {
+    if (!projectId || !memberDialog || memberDialog === "new") return;
+    if (!window.confirm(`Teammitglied „${memberDialog.full_name}“ wirklich löschen?`)) return;
+    try {
+      await api<void>(`/team-members/${memberDialog.id}/`, { method: "DELETE" });
+      await loadBoard(projectId);
+      setMemberDialog(null);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  async function saveSubteam(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!projectId || !subteamDialog) return;
+    const form = new FormData(event.currentTarget);
+    const existing = subteamDialog === "new" ? null : subteamDialog;
+    try {
+      await api<SubTeam>(existing ? `/subteams/${existing.id}/` : "/subteams/", {
+        method: existing ? "PATCH" : "POST",
+        body: JSON.stringify({
+          project: projectId,
+          name: form.get("name"),
+          description: form.get("description"),
+          members: form.getAll("members").map(Number),
+        }),
+      });
+      await loadBoard(projectId);
+      setSubteamDialog(null);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  async function deleteSubteam() {
+    if (!projectId || !subteamDialog || subteamDialog === "new") return;
+    if (!window.confirm(`Sub-Team „${subteamDialog.name}“ wirklich löschen? Zugeordnete Tickets bleiben erhalten.`)) return;
+    try {
+      await api<void>(`/subteams/${subteamDialog.id}/`, { method: "DELETE" });
+      await loadBoard(projectId);
+      setSubteamDialog(null);
     } catch (reason) {
       setError((reason as Error).message);
     }
@@ -469,6 +588,18 @@ function App() {
         }),
       });
       await loadProjects();
+      setPhaseDialog(null);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  async function deletePhase() {
+    if (!projectId || !phaseDialog || phaseDialog === "new") return;
+    if (!window.confirm(`Phase „${phaseDialog.name}“ wirklich löschen? Zugeordnete Tickets bleiben ohne Phase erhalten.`)) return;
+    try {
+      await api<void>(`/phases/${phaseDialog.id}/`, { method: "DELETE" });
+      await Promise.all([loadProjects(), loadBoard(projectId)]);
       setPhaseDialog(null);
     } catch (reason) {
       setError((reason as Error).message);
@@ -760,6 +891,16 @@ function App() {
             onCreate={() => openNewTicket()}
             onReprioritize={reprioritizeTicket}
           />
+        ) : view === "team" ? (
+          <TeamWorkspace
+            members={teamMembers}
+            subteams={subteams}
+            tickets={tickets}
+            onCreateMember={() => setMemberDialog("new")}
+            onEditMember={setMemberDialog}
+            onCreateSubteam={() => setSubteamDialog("new")}
+            onEditSubteam={setSubteamDialog}
+          />
         ) : view === "documents" ? (
           <Documents
             blocks={documentBlocks}
@@ -817,10 +958,23 @@ function App() {
 
       {ticketDialog && project && (
         <Modal title={editingTicket ? "Ticket bearbeiten" : "Neues Ticket"} onClose={() => setTicketDialog(false)} wide>
-          <form className="form ticket-form" onSubmit={saveTicket}>
+          <form
+            className="form ticket-form"
+            onSubmit={saveTicket}
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                event.target instanceof HTMLElement &&
+                !["TEXTAREA", "BUTTON"].includes(event.target.tagName)
+              ) {
+                createNextTicketRef.current = true;
+              }
+            }}
+          >
             <label className="full">
               Titel
               <input
+                ref={ticketTitleRef}
                 required
                 autoFocus
                 maxLength={200}
@@ -856,6 +1010,13 @@ function App() {
               <select value={ticketDraft.epic} onChange={(event) => setTicketDraft({ ...ticketDraft, epic: event.target.value })}>
                 <option value="">Kein Epic</option>
                 {epics.map((epic) => <option value={epic.id} key={epic.id}>{epic.title}</option>)}
+              </select>
+            </label>
+            <label>
+              Verantwortliches Sub-Team
+              <select value={ticketDraft.responsible_team} onChange={(event) => setTicketDraft({ ...ticketDraft, responsible_team: event.target.value })}>
+                <option value="">Kein Sub-Team</option>
+                {subteams.map((subteam) => <option value={subteam.id} key={subteam.id}>{subteam.name}</option>)}
               </select>
             </label>
             <label>
@@ -1059,9 +1220,12 @@ function App() {
                 />
               </label>
             </div>
-            <div className="dialog-actions">
-              <button type="button" className="button ghost" onClick={() => setPhaseDialog(null)}>Abbrechen</button>
-              <button className="button primary" type="submit">Phase speichern</button>
+            <div className="dialog-actions split-actions">
+              <div>{phaseDialog !== "new" && <button type="button" className="button danger" onClick={deletePhase}>Phase löschen</button>}</div>
+              <div>
+                <button type="button" className="button ghost" onClick={() => setPhaseDialog(null)}>Abbrechen</button>
+                <button className="button primary" type="submit">Phase speichern</button>
+              </div>
             </div>
           </form>
         </Modal>
@@ -1095,6 +1259,75 @@ function App() {
               <div>
                 <button type="button" className="button ghost" onClick={() => setEpicDialog(null)}>Abbrechen</button>
                 <button className="button primary" type="submit">Epic speichern</button>
+              </div>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {memberDialog && project && (
+        <Modal title={memberDialog === "new" ? "Teammitglied anlegen" : "Teammitglied bearbeiten"} onClose={() => setMemberDialog(null)}>
+          <form className="form ticket-form" onSubmit={saveTeamMember}>
+            <label>
+              Vorname
+              <input name="first_name" required autoFocus maxLength={120} defaultValue={memberDialog === "new" ? "" : memberDialog.first_name} />
+            </label>
+            <label>
+              Name
+              <input name="last_name" required maxLength={120} defaultValue={memberDialog === "new" ? "" : memberDialog.last_name} />
+            </label>
+            <label>
+              Funktion
+              <input name="role" maxLength={160} defaultValue={memberDialog === "new" ? "" : memberDialog.role} placeholder="z. B. Barleitung" />
+            </label>
+            <label>
+              E-Mail
+              <input name="email" type="email" defaultValue={memberDialog === "new" ? "" : memberDialog.email} placeholder="name@beispiel.de" />
+            </label>
+            <div className="dialog-actions full split-actions">
+              <div>{memberDialog !== "new" && <button type="button" className="button danger" onClick={deleteTeamMember}>Löschen</button>}</div>
+              <div>
+                <button type="button" className="button ghost" onClick={() => setMemberDialog(null)}>Abbrechen</button>
+                <button className="button primary" type="submit">Teammitglied speichern</button>
+              </div>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {subteamDialog && project && (
+        <Modal title={subteamDialog === "new" ? "Sub-Team anlegen" : "Sub-Team bearbeiten"} onClose={() => setSubteamDialog(null)} wide>
+          <form className="form" onSubmit={saveSubteam}>
+            <label>
+              Name des Sub-Teams
+              <input name="name" required autoFocus maxLength={160} defaultValue={subteamDialog === "new" ? "" : subteamDialog.name} placeholder="z. B. Bar-Team" />
+            </label>
+            <label>
+              Beschreibung (optional)
+              <textarea name="description" rows={3} defaultValue={subteamDialog === "new" ? "" : subteamDialog.description} />
+            </label>
+            <fieldset className="member-selection">
+              <legend>Mitglieder</legend>
+              {!teamMembers.length ? (
+                <p>Noch keine Teammitglieder vorhanden.</p>
+              ) : teamMembers.map((member) => (
+                <label key={member.id}>
+                  <input
+                    type="checkbox"
+                    name="members"
+                    value={member.id}
+                    defaultChecked={subteamDialog !== "new" && subteamDialog.members.includes(member.id)}
+                  />
+                  <span><strong>{member.full_name}</strong>{member.role && <small>{member.role}</small>}</span>
+                </label>
+              ))}
+            </fieldset>
+            <p className="form-hint">Ein Teammitglied kann gleichzeitig in mehreren Sub-Teams mitarbeiten.</p>
+            <div className="dialog-actions split-actions">
+              <div>{subteamDialog !== "new" && <button type="button" className="button danger" onClick={deleteSubteam}>Löschen</button>}</div>
+              <div>
+                <button type="button" className="button ghost" onClick={() => setSubteamDialog(null)}>Abbrechen</button>
+                <button className="button primary" type="submit">Sub-Team speichern</button>
               </div>
             </div>
           </form>
@@ -1235,6 +1468,82 @@ function PhaseOverviewTimeline({ phases }: { phases: Phase[] }) {
         </div>
       )}
     </section>
+  );
+}
+
+function TeamWorkspace({
+  members,
+  subteams,
+  tickets,
+  onCreateMember,
+  onEditMember,
+  onCreateSubteam,
+  onEditSubteam,
+}: {
+  members: TeamMember[];
+  subteams: SubTeam[];
+  tickets: Ticket[];
+  onCreateMember: () => void;
+  onEditMember: (member: TeamMember) => void;
+  onCreateSubteam: () => void;
+  onEditSubteam: (subteam: SubTeam) => void;
+}) {
+  return (
+    <div className="page team-page">
+      <div className="page-heading">
+        <div><span className="eyebrow">Zusammenarbeit</span><h1>Team</h1><p>Verwalte Personen und organisiere sie projektbezogen in verantwortlichen Sub-Teams.</p></div>
+        <div className="team-heading-actions">
+          <button className="button secondary" onClick={onCreateMember}><UserRound size={17} /> Teammitglied</button>
+          <button className="button primary" onClick={onCreateSubteam}><Users size={17} /> Sub-Team</button>
+        </div>
+      </div>
+      <div className="team-workspace-grid">
+        <section className="team-panel">
+          <header><div><h2>Teammitglieder</h2><p>Personen können mehreren Sub-Teams angehören.</p></div><span>{members.length}</span></header>
+          <div className="team-member-list">
+            {members.map((member) => {
+              const memberships = subteams.filter((subteam) => subteam.members.includes(member.id));
+              return (
+                <button key={member.id} className="team-member-card" onClick={() => onEditMember(member)}>
+                  <span className="member-avatar">{member.first_name.charAt(0)}{member.last_name.charAt(0)}</span>
+                  <span className="member-details">
+                    <strong>{member.full_name}</strong>
+                    <small>{member.role || "Keine Funktion angegeben"}</small>
+                    {member.email && <span>{member.email}</span>}
+                    <span className="membership-tags">
+                      {memberships.map((subteam) => <i key={subteam.id}>{subteam.name}</i>)}
+                      {!memberships.length && <i className="neutral">Noch ohne Sub-Team</i>}
+                    </span>
+                  </span>
+                  <Pencil size={15} />
+                </button>
+              );
+            })}
+            {!members.length && <div className="empty-inline">Noch keine Teammitglieder angelegt.</div>}
+          </div>
+        </section>
+        <section className="team-panel">
+          <header><div><h2>Sub-Teams</h2><p>Diese Teams stehen bei Tickets als Verantwortliche bereit.</p></div><span>{subteams.length}</span></header>
+          <div className="subteam-list">
+            {subteams.map((subteam) => {
+              const assignedTickets = tickets.filter((ticket) => ticket.responsible_team === subteam.id);
+              return (
+                <button key={subteam.id} className="subteam-card" onClick={() => onEditSubteam(subteam)}>
+                  <span className="subteam-card-heading"><span className="epic-heading-icon"><Users size={17} /></span><strong>{subteam.name}</strong><Pencil size={15} /></span>
+                  {subteam.description && <p>{subteam.description}</p>}
+                  <span className="subteam-stats"><span>{subteam.members.length} Mitglieder</span><span>{assignedTickets.length} Tickets</span></span>
+                  <span className="subteam-members">
+                    {subteam.member_details.slice(0, 5).map((member) => <i key={member.id} title={member.full_name}>{member.first_name.charAt(0)}{member.last_name.charAt(0)}</i>)}
+                    {subteam.member_details.length > 5 && <small>+{subteam.member_details.length - 5}</small>}
+                  </span>
+                </button>
+              );
+            })}
+            {!subteams.length && <div className="empty-inline">Noch keine Sub-Teams angelegt.</div>}
+          </div>
+        </section>
+      </div>
+    </div>
   );
 }
 
@@ -1481,6 +1790,7 @@ function KanbanGroup({
                     {ticket.description && <p>{ticket.description}</p>}
                     <div className="ticket-meta">
                       <span>{ticket.phase_name ?? "Ohne Phase"}</span>
+                      {ticket.responsible_team_name && <span><Users size={13} /> {ticket.responsible_team_name}</span>}
                       {ticket.due_on && <span><CalendarDays size={13} /> {new Date(`${ticket.due_on}T00:00:00`).toLocaleDateString("de-DE")}</span>}
                     </div>
                     <div className="progress"><span style={{ width: `${ticket.progress}%` }} /></div>

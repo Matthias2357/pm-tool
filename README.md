@@ -88,6 +88,9 @@ docker compose exec backend python manage.py create_example_project
 - Epics gliedern das Kanban-Board in thematische Bereiche. Karten können per
   Drag-and-drop zugleich in einen anderen Status und ein anderes Epic
   verschoben werden; ein eigener Sammelbereich enthält Tickets ohne Epic.
+- Im Arbeitsbereich `Team` werden Personen mit Name, Funktion und E-Mail
+  verwaltet. Personen können mehreren Sub-Teams angehören; Tickets werden
+  einem verantwortlichen Sub-Team statt einzelnen Personen zugeordnet.
 - Ein Klick auf eine Karte öffnet alle Details zum Bearbeiten oder Löschen.
 - In der Timeline lassen sich projektspezifische Phasen mit optionalem Start-
   und Enddatum sowie einer kurzen Beschreibung anlegen. Tickets ohne Phase

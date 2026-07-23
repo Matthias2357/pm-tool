@@ -20,6 +20,7 @@ class TicketSerializer(serializers.ModelSerializer):
     methodology_priority = serializers.SerializerMethodField()
     phase_name = serializers.CharField(source="phase.name", read_only=True)
     epic_title = serializers.CharField(source="epic.title", read_only=True)
+    responsible_team_name = serializers.CharField(source="responsible_team.name", read_only=True)
 
     class Meta:
         model = Ticket
@@ -29,11 +30,14 @@ class TicketSerializer(serializers.ModelSerializer):
         project = attrs.get("project", getattr(self.instance, "project", None))
         phase = attrs.get("phase", getattr(self.instance, "phase", None))
         epic = attrs.get("epic", getattr(self.instance, "epic", None))
+        responsible_team = attrs.get("responsible_team", getattr(self.instance, "responsible_team", None))
 
         if phase and project and phase.project_id != project.id:
             raise serializers.ValidationError({"phase": "Die Phase gehört zu einem anderen Projekt."})
         if epic and project and epic.project_id != project.id:
             raise serializers.ValidationError({"epic": "Das Epic gehört zu einem anderen Projekt."})
+        if responsible_team and project and responsible_team.project_id != project.id:
+            raise serializers.ValidationError({"responsible_team": "Das verantwortliche Sub-Team gehört zu einem anderen Projekt."})
         return attrs
 
     def validate_progress(self, value):
