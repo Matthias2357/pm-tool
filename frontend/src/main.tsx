@@ -64,6 +64,8 @@ interface Phase {
 interface Epic {
   id: number;
   project: number;
+  phase: number | null;
+  phase_name: string | null;
   title: string;
   description: string;
   progress: number;
@@ -356,7 +358,7 @@ function App() {
       title: ticket.title,
       description: ticket.description,
       status: ticket.status,
-      phase: ticket.phase?.toString() ?? "",
+      phase: ticket.epic ? "" : ticket.phase?.toString() ?? "",
       epic: ticket.epic?.toString() ?? "",
       responsible_team: ticket.responsible_team?.toString() ?? "",
       due_on: ticket.due_on ?? "",
@@ -375,7 +377,7 @@ function App() {
     const payload = {
       ...ticketDraft,
       project: projectId,
-      phase: ticketDraft.phase ? Number(ticketDraft.phase) : null,
+      phase: ticketDraft.epic ? null : ticketDraft.phase ? Number(ticketDraft.phase) : null,
       epic: ticketDraft.epic ? Number(ticketDraft.epic) : null,
       responsible_team: ticketDraft.responsible_team ? Number(ticketDraft.responsible_team) : null,
       due_on: ticketDraft.due_on || null,
@@ -566,6 +568,26 @@ function App() {
       });
     } catch (reason) {
       setTickets(original);
+      setError((reason as Error).message);
+    }
+  }
+
+  async function assignEpicPhase(epicId: number, phase: Phase | null) {
+    const original = epics;
+    setEpics((current) =>
+      current.map((epic) =>
+        epic.id === epicId
+          ? { ...epic, phase: phase?.id ?? null, phase_name: phase?.name ?? null }
+          : epic,
+      ),
+    );
+    try {
+      await api<Epic>(`/epics/${epicId}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ phase: phase?.id ?? null }),
+      });
+    } catch (reason) {
+      setEpics(original);
       setError((reason as Error).message);
     }
   }
@@ -879,8 +901,11 @@ function App() {
           <Timeline
             project={project}
             tickets={tickets}
+            epics={epics}
             onOpenTicket={openTicket}
+            onOpenEpic={setEpicDialog}
             onAssignPhase={assignTicketPhase}
+            onAssignEpicPhase={assignEpicPhase}
             onCreatePhase={() => setPhaseDialog("new")}
             onEditPhase={setPhaseDialog}
           />
@@ -1000,14 +1025,14 @@ function App() {
             </label>
             <label>
               Phase
-              <select value={ticketDraft.phase} onChange={(event) => setTicketDraft({ ...ticketDraft, phase: event.target.value })}>
-                <option value="">Keine Phase</option>
+              <select disabled={Boolean(ticketDraft.epic)} value={ticketDraft.epic ? "" : ticketDraft.phase} onChange={(event) => setTicketDraft({ ...ticketDraft, phase: event.target.value })}>
+                <option value="">{ticketDraft.epic ? "Wird über das Epic zugeordnet" : "Keine Phase"}</option>
                 {project.phases.map((phase) => <option value={phase.id} key={phase.id}>{phase.name}</option>)}
               </select>
             </label>
             <label>
               Epic
-              <select value={ticketDraft.epic} onChange={(event) => setTicketDraft({ ...ticketDraft, epic: event.target.value })}>
+              <select value={ticketDraft.epic} onChange={(event) => setTicketDraft({ ...ticketDraft, epic: event.target.value, phase: event.target.value ? "" : ticketDraft.phase })}>
                 <option value="">Kein Epic</option>
                 {epics.map((epic) => <option value={epic.id} key={epic.id}>{epic.title}</option>)}
               </select>
@@ -1348,7 +1373,16 @@ function Dashboard({
   epics: Epic[];
   onOpenKanban: () => void;
 }) {
-  const recent = tickets.slice(0, 5);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dueThrough = new Date(today);
+  dueThrough.setDate(dueThrough.getDate() + 7);
+  const dueTickets = tickets
+    .filter((ticket) => {
+      if (!ticket.due_on) return false;
+      return new Date(`${ticket.due_on}T00:00:00`) <= dueThrough;
+    })
+    .sort((a, b) => (a.due_on ?? "").localeCompare(b.due_on ?? ""));
   return (
     <div className="page">
       <div className="page-heading">
@@ -1358,14 +1392,21 @@ function Dashboard({
       <EpicOverview epics={epics} tickets={tickets} />
       <PhaseOverviewTimeline phases={project.phases} />
       <section className="content-card">
-        <div className="card-heading"><div><h2>Aktuelle Tickets</h2><p>Die zuletzt relevanten Aufgaben im Projekt.</p></div></div>
-        {recent.length ? (
+        <div className="card-heading"><div><h2>Aktuelle Tickets</h2><p>Bereits überfällig oder innerhalb der nächsten sieben Tage fällig.</p></div></div>
+        {dueTickets.length ? (
           <div className="ticket-list">
-            {recent.map((ticket) => (
-              <div key={ticket.id}><span className={`status-dot ${ticket.status}`} /><strong>{ticket.title}</strong><span>{ticket.phase_name ?? "Ohne Phase"}</span><span>{ticket.progress} %</span></div>
+            {dueTickets.map((ticket) => (
+              <div key={ticket.id}>
+                <span className={`status-dot ${ticket.status}`} />
+                <strong>{ticket.title}</strong>
+                <span>{ticket.responsible_team_name ?? "Ohne verantwortliches Team"}</span>
+                <span className={ticket.due_on && new Date(`${ticket.due_on}T00:00:00`) < today ? "ticket-due-overdue" : ""}>
+                  {ticket.due_on ? new Date(`${ticket.due_on}T00:00:00`).toLocaleDateString("de-DE") : ""}
+                </span>
+              </div>
             ))}
           </div>
-        ) : <div className="empty-inline">Noch keine Tickets vorhanden. Öffne das Kanban-Board und lege das erste Ticket an.</div>}
+        ) : <div className="empty-inline">Keine überfälligen oder in den nächsten sieben Tagen fälligen Tickets.</div>}
       </section>
     </div>
   );
@@ -1550,23 +1591,34 @@ function TeamWorkspace({
 function Timeline({
   project,
   tickets,
+  epics,
   onOpenTicket,
+  onOpenEpic,
   onAssignPhase,
+  onAssignEpicPhase,
   onCreatePhase,
   onEditPhase,
 }: {
   project: Project;
   tickets: Ticket[];
+  epics: Epic[];
   onOpenTicket: (ticket: Ticket) => void;
+  onOpenEpic: (epic: Epic) => void;
   onAssignPhase: (ticketId: number, phase: Phase | null) => void;
+  onAssignEpicPhase: (epicId: number, phase: Phase | null) => void;
   onCreatePhase: () => void;
   onEditPhase: (phase: Phase) => void;
 }) {
-  const withoutPhase = tickets.filter((ticket) => ticket.phase === null);
+  const standaloneTickets = tickets.filter((ticket) => ticket.epic === null);
+  const withoutPhaseTickets = standaloneTickets.filter((ticket) => ticket.phase === null);
+  const withoutPhaseEpics = epics.filter((epic) => epic.phase === null);
   const phases = [...project.phases].sort((a, b) => a.order - b.order);
 
-  function droppedTicketId(event: React.DragEvent) {
-    return Number(event.dataTransfer.getData("text/ticket-id"));
+  function assignDroppedItem(event: React.DragEvent, phase: Phase | null) {
+    const epicId = Number(event.dataTransfer.getData("text/epic-id"));
+    const ticketId = Number(event.dataTransfer.getData("text/ticket-id"));
+    if (epicId) onAssignEpicPhase(epicId, phase);
+    else if (ticketId) onAssignPhase(ticketId, phase);
   }
 
   return (
@@ -1575,7 +1627,7 @@ function Timeline({
         <div>
           <span className="eyebrow">Chronologische Planung</span>
           <h1>Timeline</h1>
-          <p>Erstelle eigene Projektphasen und ordne Tickets per Drag-and-drop ein.</p>
+          <p>Ordne Epics und einzelne Tickets ohne Epic per Drag-and-drop in Projektphasen ein.</p>
         </div>
         <button className="button primary" onClick={onCreatePhase}><Plus size={17} /> Phase erstellen</button>
       </div>
@@ -1583,20 +1635,20 @@ function Timeline({
       <section
         className="unphased-section"
         onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => {
-          const id = droppedTicketId(event);
-          if (id) onAssignPhase(id, null);
-        }}
+        onDrop={(event) => assignDroppedItem(event, null)}
       >
         <header>
-          <div><span className="unphased-icon"><ListChecks size={18} /></span><div><h2>Tickets ohne Phase</h2><p>Ziehe diese Tickets in eine der Projektphasen.</p></div></div>
-          <b>{withoutPhase.length}</b>
+          <div><span className="unphased-icon"><ListChecks size={18} /></span><div><h2>Noch ohne Phase</h2><p>Ziehe Epics oder einzelne Tickets in eine Projektphase.</p></div></div>
+          <b>{withoutPhaseEpics.length + withoutPhaseTickets.length}</b>
         </header>
         <div className="unphased-tickets">
-          {withoutPhase.map((ticket) => (
+          {withoutPhaseEpics.map((epic) => (
+            <TimelineEpicRow epic={epic} tickets={tickets.filter((ticket) => ticket.epic === epic.id)} key={`epic-${epic.id}`} onOpen={onOpenEpic} compact />
+          ))}
+          {withoutPhaseTickets.map((ticket) => (
             <TimelineTicketRow ticket={ticket} key={ticket.id} onOpen={onOpenTicket} compact />
           ))}
-          {!withoutPhase.length && <div className="timeline-drop-empty"><CheckCircle2 size={17} /> Alle Tickets sind einer Phase zugeordnet.</div>}
+          {!withoutPhaseEpics.length && !withoutPhaseTickets.length && <div className="timeline-drop-empty"><CheckCircle2 size={17} /> Alle Einträge sind einer Phase zugeordnet.</div>}
         </div>
       </section>
 
@@ -1610,16 +1662,15 @@ function Timeline({
           </div>
         )}
         {phases.map((phase, index) => {
-          const phaseTickets = tickets.filter((ticket) => ticket.phase === phase.id);
+          const phaseTickets = standaloneTickets.filter((ticket) => ticket.phase === phase.id);
+          const phaseEpics = epics.filter((epic) => epic.phase === phase.id);
+          const itemCount = phaseTickets.length + phaseEpics.length;
           return (
             <section
               className="timeline-phase"
               key={phase.id}
               onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                const id = droppedTicketId(event);
-                if (id) onAssignPhase(id, phase);
-              }}
+              onDrop={(event) => assignDroppedItem(event, phase)}
             >
               <div className="timeline-rail">
                 <span>{String(index + 1).padStart(2, "0")}</span>
@@ -1633,14 +1684,17 @@ function Timeline({
                     {phase.description && <p className="phase-description">{phase.description}</p>}
                     <div className="phase-dates">
                       <span><CalendarDays size={13} /> {formatDateRange(phase.starts_on, phase.ends_on)}</span>
-                      <span>{phaseTickets.length} Tickets</span>
+                      <span>{itemCount} {itemCount === 1 ? "Eintrag" : "Einträge"}</span>
                     </div>
                   </div>
                   <button className="icon-button" onClick={() => onEditPhase(phase)} aria-label={`${phase.name} bearbeiten`}><Pencil size={17} /></button>
                 </header>
                 <div className="phase-ticket-list">
+                  {phaseEpics.map((epic) => (
+                    <TimelineEpicRow epic={epic} tickets={tickets.filter((ticket) => ticket.epic === epic.id)} key={`epic-${epic.id}`} onOpen={onOpenEpic} />
+                  ))}
                   {phaseTickets.map((ticket) => <TimelineTicketRow ticket={ticket} key={ticket.id} onOpen={onOpenTicket} />)}
-                  {!phaseTickets.length && <div className="timeline-drop-empty">Ticket in diese Phase ziehen</div>}
+                  {!itemCount && <div className="timeline-drop-empty">Epic oder Ticket in diese Phase ziehen</div>}
                 </div>
               </div>
             </section>
@@ -1648,6 +1702,27 @@ function Timeline({
         })}
       </div>
     </div>
+  );
+}
+
+function TimelineEpicRow({ epic, tickets, onOpen, compact = false }: { epic: Epic; tickets: Ticket[]; onOpen: (epic: Epic) => void; compact?: boolean }) {
+  const completed = tickets.filter((ticket) => ticket.status === "done").length;
+  const progress = tickets.length ? Math.round((completed / tickets.length) * 100) : 0;
+  const starts = tickets.map((ticket) => ticket.starts_on).filter((value): value is string => Boolean(value)).sort();
+  const ends = tickets.map((ticket) => ticket.due_on).filter((value): value is string => Boolean(value)).sort();
+  return (
+    <button
+      className={`timeline-ticket timeline-epic ${compact ? "compact" : ""}`}
+      draggable
+      onDragStart={(event) => event.dataTransfer.setData("text/epic-id", String(epic.id))}
+      onClick={() => onOpen(epic)}
+    >
+      <span className="timeline-epic-icon"><GitBranch size={14} /></span>
+      <span className="timeline-ticket-title"><strong>{epic.title}</strong><small>Epic · {tickets.length} {tickets.length === 1 ? "Ticket" : "Tickets"}</small></span>
+      <span className="timeline-ticket-date start-date"><small>Start</small><strong>{formatGermanDate(starts[0] ?? null)}</strong></span>
+      <span className="timeline-ticket-date"><small>Ende</small><strong>{formatGermanDate(ends[ends.length - 1] ?? null)}</strong></span>
+      <span className="timeline-ticket-progress"><i><b style={{ width: `${progress}%` }} /></i><small>{progress} %</small></span>
+    </button>
   );
 }
 
@@ -1784,7 +1859,10 @@ function KanbanGroup({
                   >
                     <div className="ticket-card-top">
                       <span className="epic-label">{epic?.title ?? "Ohne Epic"}</span>
-                      {critical(ticket) && <AlertTriangle size={16} />}
+                      <span className="ticket-card-indicators">
+                        {ticket.status === "done" && <CheckCircle2 className="ticket-done-check" size={17} aria-label="Erledigt" />}
+                        {critical(ticket) && <AlertTriangle size={16} />}
+                      </span>
                     </div>
                     <strong>{ticket.title}</strong>
                     {ticket.description && <p>{ticket.description}</p>}

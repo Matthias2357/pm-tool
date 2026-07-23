@@ -5,6 +5,7 @@ from .models import Epic, MindMapEdge, MindMapNode, Ticket
 
 class EpicSerializer(serializers.ModelSerializer):
     project_name = serializers.CharField(source="project.name", read_only=True)
+    phase_name = serializers.CharField(source="phase.name", read_only=True)
 
     class Meta:
         model = Epic
@@ -14,6 +15,13 @@ class EpicSerializer(serializers.ModelSerializer):
         if value > 100:
             raise serializers.ValidationError("Der Fortschritt darf maximal 100 Prozent betragen.")
         return value
+
+    def validate(self, attrs):
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        phase = attrs.get("phase", getattr(self.instance, "phase", None))
+        if phase and project and phase.project_id != project.id:
+            raise serializers.ValidationError({"phase": "Die Phase gehört zu einem anderen Projekt."})
+        return attrs
 
 
 class TicketSerializer(serializers.ModelSerializer):

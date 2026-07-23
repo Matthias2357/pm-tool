@@ -120,3 +120,23 @@ class TicketApiTests(APITestCase):
         self.assertEqual(response.data["epic_title"], "Veranstaltungslogistik")
         self.assertEqual(epic_list.status_code, status.HTTP_200_OK)
         self.assertEqual([item["title"] for item in epic_list.data["results"]], ["Veranstaltungslogistik"])
+
+    def test_epic_can_be_assigned_to_phase_but_not_foreign_phase(self):
+        epic = Epic.objects.create(project=self.project, title="Veranstaltungslogistik")
+
+        response = self.client.patch(
+            f"/api/epics/{epic.id}/",
+            {"phase": self.phase.id},
+            format="json",
+        )
+        invalid_response = self.client.patch(
+            f"/api/epics/{epic.id}/",
+            {"phase": self.other_phase.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["phase"], self.phase.id)
+        self.assertEqual(response.data["phase_name"], "Umsetzung")
+        self.assertEqual(invalid_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("phase", invalid_response.data)

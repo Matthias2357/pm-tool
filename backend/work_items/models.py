@@ -7,6 +7,7 @@ from teams.models import SubTeam
 
 class Epic(TimeStampedModel):
     project = models.ForeignKey(Project, related_name="epics", on_delete=models.CASCADE)
+    phase = models.ForeignKey(Phase, related_name="epics", null=True, blank=True, on_delete=models.SET_NULL)
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     progress = models.PositiveSmallIntegerField(default=0)

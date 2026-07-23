@@ -93,9 +93,10 @@ docker compose exec backend python manage.py create_example_project
   einem verantwortlichen Sub-Team statt einzelnen Personen zugeordnet.
 - Ein Klick auf eine Karte öffnet alle Details zum Bearbeiten oder Löschen.
 - In der Timeline lassen sich projektspezifische Phasen mit optionalem Start-
-  und Enddatum sowie einer kurzen Beschreibung anlegen. Tickets ohne Phase
-  stehen oben in einem Sammelfeld und können per Drag-and-drop in eine Phase
-  oder zurück verschoben werden.
+  und Enddatum sowie einer kurzen Beschreibung anlegen. Epics und einzelne
+  Tickets ohne Epic stehen ohne Phasenzuordnung oben in einem Sammelfeld und
+  können per Drag-and-drop in eine Phase oder zurück verschoben werden. Tickets
+  innerhalb eines Epics werden dort als gemeinsame Epic-Karte zusammengefasst.
 - Die Übersicht zeigt diese Phasen mit Zeitraum und Beschreibung an einem
   vertikalen Zeitstrahl.
 - Die Phasenzuordnung ist dieselbe wie im Kanban und steht dort unmittelbar im

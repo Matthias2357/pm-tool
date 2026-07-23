@@ -5,7 +5,7 @@ from .serializers import EpicSerializer, MindMapEdgeSerializer, MindMapNodeSeria
 
 
 class EpicViewSet(ModelViewSet):
-    queryset = Epic.objects.select_related("project").all()
+    queryset = Epic.objects.select_related("project", "phase").all()
     serializer_class = EpicSerializer
 
     def get_queryset(self):
