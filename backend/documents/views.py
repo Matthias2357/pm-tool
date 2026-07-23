@@ -1,7 +1,12 @@
 from rest_framework.viewsets import ModelViewSet
 
-from .models import Document, DocumentBlock, DocumentEntry
-from .serializers import DocumentBlockSerializer, DocumentEntrySerializer, DocumentSerializer
+from .models import Document, DocumentBlock, DocumentEntry, EditableNote
+from .serializers import (
+    DocumentBlockSerializer,
+    DocumentEntrySerializer,
+    DocumentSerializer,
+    EditableNoteSerializer,
+)
 
 
 class DocumentViewSet(ModelViewSet):
@@ -41,3 +46,21 @@ class DocumentBlockViewSet(ModelViewSet):
         queryset = super().get_queryset()
         project = self.request.query_params.get("project")
         return queryset.filter(project_id=project) if project else queryset
+
+
+class EditableNoteViewSet(ModelViewSet):
+    queryset = (
+        EditableNote.objects.select_related("entry__block__project", "document")
+        .all()
+    )
+    serializer_class = EditableNoteSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        entry = self.request.query_params.get("entry")
+        project = self.request.query_params.get("project")
+        if entry:
+            queryset = queryset.filter(entry_id=entry)
+        if project:
+            queryset = queryset.filter(entry__block__project_id=project)
+        return queryset

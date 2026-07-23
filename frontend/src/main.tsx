@@ -1,5 +1,9 @@
-import React, { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
+import { katex as markdownItKatex } from "@mdit/plugin-katex";
+import html2pdf from "html2pdf.js";
+import MarkdownIt from "markdown-it";
+import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
   CalendarDays,
@@ -18,6 +22,7 @@ import {
   ListChecks,
   Loader2,
   Menu,
+  NotebookPen,
   Pencil,
   Plus,
   Settings,
@@ -26,9 +31,11 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
+import "katex/dist/katex.min.css";
 import "./styles.css";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(/\/$/, "");
+const noteRenderer = new MarkdownIt({ breaks: true, linkify: true, typographer: true }).use(markdownItKatex);
 
 type View = "dashboard" | "kanban" | "timeline" | "mindmap" | "methodology" | "documents";
 type TicketStatus = "backlog" | "todo" | "in_progress" | "review" | "done";
@@ -103,6 +110,7 @@ interface DocumentAttachment {
   file_name: string;
   file_kind: DocumentKind;
   file_size: number;
+  editable_note_id: number | null;
 }
 
 interface DocumentEntry {
@@ -121,6 +129,20 @@ interface DocumentBlock {
   description: string;
   order: number;
   entries: DocumentEntry[];
+}
+
+interface EditableNote {
+  id: number;
+  entry: number;
+  document: number | null;
+  document_data: DocumentAttachment | null;
+  title: string;
+  source: string;
+}
+
+interface NoteEditorState {
+  entry: DocumentEntry;
+  note: EditableNote | null;
 }
 
 const emptyTicket: TicketDraft = {
@@ -144,7 +166,7 @@ const columns: { status: TicketStatus; label: string; accent: string }[] = [
   { status: "done", label: "Erledigt", accent: "#e5484d" },
 ];
 
-const navigation: { id: View; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
+const navigation: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "dashboard", label: "Übersicht", icon: LayoutDashboard },
   { id: "kanban", label: "Kanban", icon: KanbanSquare },
   { id: "timeline", label: "Timeline", icon: CalendarDays },
@@ -192,6 +214,7 @@ function App() {
   const [entryDialogBlock, setEntryDialogBlock] = useState<DocumentBlock | null>(null);
   const [uploadEntry, setUploadEntry] = useState<DocumentEntry | null>(null);
   const [previewDocument, setPreviewDocument] = useState<DocumentAttachment | null>(null);
+  const [noteEditor, setNoteEditor] = useState<NoteEditorState | null>(null);
 
   const project = projects.find((item) => item.id === projectId) ?? null;
 
@@ -471,6 +494,70 @@ function App() {
     }
   }
 
+  async function openEditableNote(entry: DocumentEntry, noteId?: number) {
+    if (!noteId) {
+      setNoteEditor({ entry, note: null });
+      return;
+    }
+    try {
+      const note = await api<EditableNote>(`/editable-notes/${noteId}/`);
+      setNoteEditor({ entry, note });
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  async function saveEditableNote(title: string, source: string, preview: HTMLElement) {
+    if (!projectId || !noteEditor) return;
+    try {
+      const note = await api<EditableNote>(
+        noteEditor.note ? `/editable-notes/${noteEditor.note.id}/` : "/editable-notes/",
+        {
+          method: noteEditor.note ? "PATCH" : "POST",
+          body: JSON.stringify({
+            entry: noteEditor.entry.id,
+            title,
+            source,
+          }),
+        },
+      );
+      const fileName = `${title.trim().replace(/[^a-zA-Z0-9äöüÄÖÜß_-]+/g, "_") || "Notiz"}.pdf`;
+      const pdfBlob = await html2pdf()
+        .set({
+          margin: [14, 14, 16, 14],
+          filename: fileName,
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: { scale: 2, backgroundColor: "#ffffff" },
+          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+        })
+        .from(preview)
+        .outputPdf("blob");
+      const pdfFile = new File([pdfBlob], fileName, { type: "application/pdf" });
+      const upload = new FormData();
+      upload.append("title", title);
+      upload.append("file", pdfFile);
+
+      let documentId = note.document;
+      if (documentId) {
+        await api<DocumentAttachment>(`/documents/${documentId}/`, { method: "PATCH", body: upload });
+      } else {
+        upload.append("project", String(projectId));
+        upload.append("entry", String(noteEditor.entry.id));
+        upload.append("document_type", "other");
+        const document = await api<DocumentAttachment>("/documents/", { method: "POST", body: upload });
+        documentId = document.id;
+        await api<EditableNote>(`/editable-notes/${note.id}/`, {
+          method: "PATCH",
+          body: JSON.stringify({ document: documentId }),
+        });
+      }
+      await loadBoard(projectId);
+      setNoteEditor(null);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
   return (
     <div className="app-shell">
       <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
@@ -584,6 +671,8 @@ function App() {
             onEditBlock={setEditBlock}
             onCreateEntry={setEntryDialogBlock}
             onAddDocuments={setUploadEntry}
+            onCreateNote={(entry) => openEditableNote(entry)}
+            onEditNote={(entry, noteId) => openEditableNote(entry, noteId)}
             onPreview={setPreviewDocument}
           />
         ) : (
@@ -816,6 +905,14 @@ function App() {
           </form>
         </Modal>
       )}
+
+      {noteEditor && (
+        <NoteEditor
+          state={noteEditor}
+          onClose={() => setNoteEditor(null)}
+          onSave={saveEditableNote}
+        />
+      )}
     </div>
   );
 }
@@ -1047,6 +1144,8 @@ function Documents({
   onEditBlock,
   onCreateEntry,
   onAddDocuments,
+  onCreateNote,
+  onEditNote,
   onPreview,
 }: {
   blocks: DocumentBlock[];
@@ -1054,6 +1153,8 @@ function Documents({
   onEditBlock: (block: DocumentBlock) => void;
   onCreateEntry: (block: DocumentBlock) => void;
   onAddDocuments: (entry: DocumentEntry) => void;
+  onCreateNote: (entry: DocumentEntry) => void;
+  onEditNote: (entry: DocumentEntry, noteId: number) => void;
   onPreview: (document: DocumentAttachment) => void;
 }) {
   const [openBlocks, setOpenBlocks] = useState<Set<number>>(() => new Set(blocks.map((block) => block.id)));
@@ -1137,21 +1238,45 @@ function Documents({
                             <span className="entry-title"><strong>{entry.name}</strong>{entry.notes && <small>{entry.notes}</small>}</span>
                             <span className="attachment-count"><FileIcon size={14} /> {entry.documents.length}</span>
                           </button>
+                          <button
+                            className="entry-note-button"
+                            onClick={() => onCreateNote(entry)}
+                            title="Markdown-/TeX-Notiz erstellen"
+                          >
+                            <NotebookPen size={15} />
+                            Notiz
+                          </button>
                           {entryOpen && (
                             <div className="attachment-grid">
                               {!entry.documents.length && <div className="attachment-empty">Für diesen Eintrag wurden keine Dokumente hochgeladen.</div>}
                               {entry.documents.map((document) => (
-                                <button className="attachment-tile" key={document.id} onClick={() => onPreview(document)}>
-                                  <AttachmentThumbnail document={document} />
-                                  <span className="attachment-info">
-                                    <strong>{document.title}</strong>
-                                    <small>{document.file_name} · {formatFileSize(document.file_size)}</small>
-                                  </span>
-                                </button>
+                                <div className="attachment-tile-wrap" key={document.id}>
+                                  <button className="attachment-tile" onClick={() => onPreview(document)}>
+                                    <AttachmentThumbnail document={document} />
+                                    <span className="attachment-info">
+                                      <strong>{document.title}</strong>
+                                      <small>{document.file_name} · {formatFileSize(document.file_size)}</small>
+                                    </span>
+                                  </button>
+                                  {document.editable_note_id && (
+                                    <button
+                                      className="edit-note-button"
+                                      onClick={() => onEditNote(entry, document.editable_note_id!)}
+                                      aria-label={`${document.title} bearbeiten`}
+                                      title="Notiz bearbeiten und PDF neu erzeugen"
+                                    >
+                                      <Pencil size={14} />
+                                    </button>
+                                  )}
+                                </div>
                               ))}
                               <button className="attachment-tile add-attachment-tile" onClick={() => onAddDocuments(entry)}>
                                 <span className="attachment-preview"><Plus size={24} /></span>
                                 <span className="attachment-info"><strong>Dokumente hinzufügen</strong><small>PDF, Word oder Bilder</small></span>
+                              </button>
+                              <button className="attachment-tile add-note-tile" onClick={() => onCreateNote(entry)}>
+                                <span className="attachment-preview"><NotebookPen size={24} /></span>
+                                <span className="attachment-info"><strong>Notiz erstellen</strong><small>Markdown und TeX als PDF</small></span>
                               </button>
                             </div>
                           )}
@@ -1260,6 +1385,81 @@ function toLocalIsoDate(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function NoteEditor({
+  state,
+  onClose,
+  onSave,
+}: {
+  state: NoteEditorState;
+  onClose: () => void;
+  onSave: (title: string, source: string, preview: HTMLElement) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(state.note?.title ?? "Neue Notiz");
+  const [source, setSource] = useState(
+    state.note?.source ??
+      "Hier beginnt deine Notiz in **Markdown**.\n\nEine TeX-Formel kann inline stehen: $a^2 + b^2 = c^2$\n\nOder als eigener Block:\n\n$$\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$$",
+  );
+  const [saving, setSaving] = useState(false);
+  const previewRef = useRef<HTMLElement>(null);
+  const rendered = useMemo(() => noteRenderer.render(source), [source]);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!previewRef.current) return;
+    setSaving(true);
+    try {
+      await onSave(title, source, previewRef.current);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="note-editor-backdrop" role="dialog" aria-modal="true" aria-label="Notiz bearbeiten">
+      <form className="note-editor-shell" onSubmit={submit}>
+        <header>
+          <div>
+            <span className="eyebrow">{state.note ? "Notiz bearbeiten" : "Neue Notiz"} · {state.entry.name}</span>
+            <input
+              required
+              maxLength={200}
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              aria-label="Titel der Notiz"
+            />
+          </div>
+          <div>
+            <button type="button" className="button ghost" onClick={onClose}>Abbrechen</button>
+            <button type="submit" className="button primary" disabled={saving}>
+              {saving ? <><Loader2 className="spin" size={17} /> PDF wird erstellt …</> : <><FileText size={17} /> Als PDF speichern</>}
+            </button>
+          </div>
+        </header>
+        <div className="note-editor-help">
+          <span><strong>Markdown:</strong> <code># Überschrift</code>, <code>**fett**</code>, <code>- Liste</code></span>
+          <span><strong>TeX:</strong> <code>$Formel$</code> oder <code>$$Formel$$</code></span>
+          <span>Die Quelle bleibt gespeichert und kann später über das Stift-Symbol bearbeitet werden.</span>
+        </div>
+        <div className="note-editor-columns">
+          <section className="note-source-pane">
+            <header><strong>Markdown / TeX</strong><span>Quelltext</span></header>
+            <textarea value={source} onChange={(event) => setSource(event.target.value)} spellCheck />
+          </section>
+          <section className="note-preview-pane">
+            <header><strong>PDF-Vorschau</strong><span>DIN A4</span></header>
+            <div className="note-page-wrap">
+              <article className="note-pdf-page" ref={previewRef}>
+                <h1 className="note-pdf-title">{title}</h1>
+                <div dangerouslySetInnerHTML={{ __html: rendered }} />
+              </article>
+            </div>
+          </section>
+        </div>
+      </form>
+    </div>
+  );
 }
 
 function DocumentPreview({ document, onClose }: { document: DocumentAttachment; onClose: () => void }) {

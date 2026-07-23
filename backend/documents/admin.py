@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Document, DocumentBlock, DocumentEntry
+from .models import Document, DocumentBlock, DocumentEntry, EditableNote
 
 
 @admin.register(DocumentBlock)
@@ -22,3 +22,10 @@ class DocumentAdmin(admin.ModelAdmin):
     list_display = ("title", "project", "entry", "ticket", "document_type", "created_at")
     list_filter = ("project", "document_type")
     search_fields = ("title", "notes")
+
+
+@admin.register(EditableNote)
+class EditableNoteAdmin(admin.ModelAdmin):
+    list_display = ("title", "entry", "document", "updated_at")
+    list_filter = ("entry__block__project", "entry__block")
+    search_fields = ("title", "source")

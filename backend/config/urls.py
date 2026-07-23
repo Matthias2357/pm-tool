@@ -4,7 +4,7 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from documents.views import DocumentBlockViewSet, DocumentEntryViewSet, DocumentViewSet
+from documents.views import DocumentBlockViewSet, DocumentEntryViewSet, DocumentViewSet, EditableNoteViewSet
 from meetings.views import MeetingViewSet
 from projects.views import PhaseViewSet, ProjectViewSet
 from work_items.views import EpicViewSet, MindMapEdgeViewSet, MindMapNodeViewSet, TicketViewSet
@@ -20,6 +20,7 @@ router.register("mindmap-edges", MindMapEdgeViewSet)
 router.register("documents", DocumentViewSet)
 router.register("document-blocks", DocumentBlockViewSet)
 router.register("document-entries", DocumentEntryViewSet)
+router.register("editable-notes", EditableNoteViewSet)
 router.register("meetings", MeetingViewSet)
 
 urlpatterns = [

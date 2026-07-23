@@ -100,6 +100,10 @@ docker compose exec backend python manage.py create_example_project
   Word-Dokumente und Bilder enthalten.
 - Blöcke und Dateilisten sind ein- und ausklappbar. Bilder und PDFs lassen sich
   in einer großen Vorschau öffnen; Bilder können dort gezoomt werden.
+- In einem Dokumenteneintrag lassen sich editierbare Notizen mit Markdown und
+  eingebetteten TeX-Formeln erstellen. Beim Speichern wird eine PDF erzeugt und
+  in der Dokumentenbibliothek abgelegt. Das Stift-Symbol an dieser PDF öffnet
+  später erneut die gespeicherte Quelle und ersetzt die PDF nach Änderungen.
 - Status, Phase, Epic, Termin, Priorität, Fortschritt und Kritikalität werden in
   PostgreSQL unter `<PM_TOOL_CONTENTS_DIR>/postgres` gespeichert.
 - Die weiteren Arbeitsbereiche sind bereits in der Navigation angelegt und

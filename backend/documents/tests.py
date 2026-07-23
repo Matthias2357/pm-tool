@@ -7,7 +7,7 @@ from rest_framework.test import APITestCase
 
 from projects.models import Project
 
-from .models import DocumentBlock, DocumentEntry
+from .models import Document, DocumentBlock, DocumentEntry, EditableNote
 
 
 class DocumentApiTests(APITestCase):
@@ -90,3 +90,34 @@ class DocumentApiTests(APITestCase):
         self.block.refresh_from_db()
         self.assertEqual(self.block.name, "Festleitersitzungen")
         self.assertEqual(self.block.entries.count(), 1)
+
+    def test_editable_note_keeps_source_and_generated_document_link(self):
+        document = Document.objects.create(
+            project=self.project,
+            entry=self.entry,
+            title="Planungsnotiz",
+            file=SimpleUploadedFile("planungsnotiz.pdf", b"pdf"),
+        )
+        response = self.client.post(
+            "/api/editable-notes/",
+            {
+                "entry": self.entry.id,
+                "document": document.id,
+                "title": "Planungsnotiz",
+                "source": "# Stand\n\n$a^2 + b^2 = c^2$",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        note = EditableNote.objects.get(pk=response.data["id"])
+        update = self.client.patch(
+            f"/api/editable-notes/{note.id}/",
+            {"source": "# Neuer Stand"},
+            format="json",
+        )
+
+        self.assertEqual(update.status_code, status.HTTP_200_OK)
+        note.refresh_from_db()
+        self.assertEqual(note.source, "# Neuer Stand")
+        self.assertEqual(note.document_id, document.id)

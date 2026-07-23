@@ -68,3 +68,22 @@ class Document(TimeStampedModel):
 
     def __str__(self):
         return self.title
+
+
+class EditableNote(TimeStampedModel):
+    entry = models.ForeignKey(DocumentEntry, related_name="editable_notes", on_delete=models.CASCADE)
+    document = models.OneToOneField(
+        Document,
+        related_name="editable_note",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    title = models.CharField(max_length=200)
+    source = models.TextField()
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return self.title

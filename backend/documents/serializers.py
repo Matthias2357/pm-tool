@@ -2,7 +2,7 @@ from pathlib import Path
 
 from rest_framework import serializers
 
-from .models import Document, DocumentBlock, DocumentEntry
+from .models import Document, DocumentBlock, DocumentEntry, EditableNote
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
@@ -13,6 +13,7 @@ class DocumentSerializer(serializers.ModelSerializer):
     file_name = serializers.SerializerMethodField()
     file_kind = serializers.SerializerMethodField()
     file_size = serializers.SerializerMethodField()
+    editable_note_id = serializers.SerializerMethodField()
 
     class Meta:
         model = Document
@@ -55,6 +56,19 @@ class DocumentSerializer(serializers.ModelSerializer):
         except OSError:
             return 0
 
+    def get_editable_note_id(self, obj):
+        try:
+            return obj.editable_note.id
+        except EditableNote.DoesNotExist:
+            return None
+
+    def update(self, instance, validated_data):
+        old_file = instance.file if "file" in validated_data else None
+        updated = super().update(instance, validated_data)
+        if old_file and old_file.name != updated.file.name:
+            old_file.delete(save=False)
+        return updated
+
 
 class DocumentEntrySerializer(serializers.ModelSerializer):
     documents = DocumentSerializer(many=True, read_only=True)
@@ -70,3 +84,18 @@ class DocumentBlockSerializer(serializers.ModelSerializer):
     class Meta:
         model = DocumentBlock
         fields = "__all__"
+
+
+class EditableNoteSerializer(serializers.ModelSerializer):
+    document_data = DocumentSerializer(source="document", read_only=True)
+
+    class Meta:
+        model = EditableNote
+        fields = "__all__"
+
+    def validate(self, attrs):
+        entry = attrs.get("entry", getattr(self.instance, "entry", None))
+        document = attrs.get("document", getattr(self.instance, "document", None))
+        if document and entry and document.entry_id != entry.id:
+            raise serializers.ValidationError({"document": "Das PDF gehört zu einem anderen Eintrag."})
+        return attrs
