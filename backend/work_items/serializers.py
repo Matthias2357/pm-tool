@@ -4,28 +4,65 @@ from .models import Epic, MindMapEdge, MindMapNode, Ticket
 
 
 class EpicSerializer(serializers.ModelSerializer):
+    project_name = serializers.CharField(source="project.name", read_only=True)
+
     class Meta:
         model = Epic
         fields = "__all__"
 
+    def validate_progress(self, value):
+        if value > 100:
+            raise serializers.ValidationError("Der Fortschritt darf maximal 100 Prozent betragen.")
+        return value
+
 
 class TicketSerializer(serializers.ModelSerializer):
-    eisenhower_quadrant = serializers.SerializerMethodField()
+    methodology_priority = serializers.SerializerMethodField()
+    phase_name = serializers.CharField(source="phase.name", read_only=True)
+    epic_title = serializers.CharField(source="epic.title", read_only=True)
 
     class Meta:
         model = Ticket
         fields = "__all__"
 
-    def get_eisenhower_quadrant(self, obj):
+    def validate(self, attrs):
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        phase = attrs.get("phase", getattr(self.instance, "phase", None))
+        epic = attrs.get("epic", getattr(self.instance, "epic", None))
+
+        if phase and project and phase.project_id != project.id:
+            raise serializers.ValidationError({"phase": "Die Phase gehört zu einem anderen Projekt."})
+        if epic and project and epic.project_id != project.id:
+            raise serializers.ValidationError({"epic": "Das Epic gehört zu einem anderen Projekt."})
+        return attrs
+
+    def validate_progress(self, value):
+        if value > 100:
+            raise serializers.ValidationError("Der Fortschritt darf maximal 100 Prozent betragen.")
+        return value
+
+    def validate_importance(self, value):
+        if value != -1 and not 1 <= value <= 4:
+            raise serializers.ValidationError("Die Wichtigkeit muss -1 oder zwischen 1 und 4 sein.")
+        return value
+
+    def validate_urgency(self, value):
+        if value != -1 and not 1 <= value <= 4:
+            raise serializers.ValidationError("Die Dringlichkeit muss -1 oder zwischen 1 und 4 sein.")
+        return value
+
+    def get_methodology_priority(self, obj):
+        if obj.importance == -1 or obj.urgency == -1:
+            return "unprioritized"
         important = obj.importance >= 3
         urgent = obj.urgency >= 3
         if important and urgent:
-            return "do_now"
-        if important:
-            return "schedule"
+            return "alpha"
         if urgent:
-            return "delegate"
-        return "discard"
+            return "beta"
+        if important:
+            return "gamma"
+        return "delta"
 
 
 class MindMapNodeSerializer(serializers.ModelSerializer):

@@ -94,3 +94,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
 }
+
+# PDF-Dateien werden im PM-Tool in einer Vorschau derselben Origin angezeigt.
+# Fremde Websites dürfen Backend-Inhalte weiterhin nicht einbetten.
+X_FRAME_OPTIONS = "SAMEORIGIN"

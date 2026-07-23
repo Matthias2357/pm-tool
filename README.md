@@ -55,15 +55,55 @@ Backend API: http://localhost:8000/api/
 Admin: http://localhost:8000/admin/
 ```
 
+Das Frontend greift standardmaessig ueber den eingebauten Pfad `/api` auf das
+Backend zu. Dadurch funktioniert die Anwendung auch beim Zugriff ueber eine
+andere lokale IP, ohne dass der Browser einen separaten API-Host erreichen muss.
+
 ## Datenbank vorbereiten
 
-Nach dem ersten Start:
+Ausstehende Datenbankmigrationen werden beim Start des Backend-Containers
+automatisch ausgeführt. Ein Administratorkonto kann bei Bedarf anschließend
+angelegt werden:
 
 ```bash
-docker compose exec backend python manage.py migrate
 docker compose exec backend python manage.py createsuperuser
+```
+
+Danach kann unter `http://localhost:5173` direkt ein eigenes Projekt angelegt
+werden. Die Phasen Startup, Grobplanung, Detailplanung und Umsetzung entstehen
+automatisch. Optional erzeugt der folgende Befehl ein zusätzliches
+Beispielprojekt:
+
+```bash
 docker compose exec backend python manage.py create_example_project
 ```
+
+## Bedienung
+
+- Über die Projektauswahl oben wird das aktive Projekt gewechselt.
+- `+ Projekt` legt ein Projekt mit den vier Standardphasen an.
+- `+ Ticket` erstellt eine neue Kanban-Karte.
+- Im Kanban-Board lassen sich Karten per Drag-and-drop zwischen den Spalten
+  verschieben.
+- Ein Klick auf eine Karte öffnet alle Details zum Bearbeiten oder Löschen.
+- Unter `Methodik` verwendet die individuelle Eisenhower-Matrix:
+  Alpha (wichtig/dringend), Beta (nicht wichtig/dringend), Gamma
+  (wichtig/nicht dringend) und Delta (nicht wichtig/nicht dringend).
+- Tickets lassen sich in der individuellen Matrix per Drag-and-drop neu
+  priorisieren. Gamma-Aufgaben werden erneut bewertet und erst als
+  Alpha-Aufgaben bearbeitet, sobald sie dringend werden.
+- Neue Tickets starten mit Wichtigkeit und Dringlichkeit `-1` im Feld
+  `Noch ohne Prio`. Von dort werden sie per Drag-and-drop erstmals Alpha, Beta,
+  Gamma oder Delta zugeordnet.
+- Im Dokumentenbereich lassen sich thematische Blöcke und darin datierte
+  Einträge mit Notizen erstellen. Jeder Eintrag kann mehrere PDFs,
+  Word-Dokumente und Bilder enthalten.
+- Blöcke und Dateilisten sind ein- und ausklappbar. Bilder und PDFs lassen sich
+  in einer großen Vorschau öffnen; Bilder können dort gezoomt werden.
+- Status, Phase, Epic, Termin, Priorität, Fortschritt und Kritikalität werden in
+  PostgreSQL unter `<PM_TOOL_CONTENTS_DIR>/postgres` gespeichert.
+- Die weiteren Arbeitsbereiche sind bereits in der Navigation angelegt und
+  werden schrittweise ergänzt.
 
 ## Backup
 

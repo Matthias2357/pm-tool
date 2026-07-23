@@ -8,10 +8,24 @@ class EpicViewSet(ModelViewSet):
     queryset = Epic.objects.select_related("project").all()
     serializer_class = EpicSerializer
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        project = self.request.query_params.get("project")
+        return queryset.filter(project_id=project) if project else queryset
+
 
 class TicketViewSet(ModelViewSet):
     queryset = Ticket.objects.select_related("project", "phase", "epic").all()
     serializer_class = TicketSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        filters = {
+            field: self.request.query_params.get(field)
+            for field in ("project", "phase", "epic", "status")
+            if self.request.query_params.get(field)
+        }
+        return queryset.filter(**filters)
 
 
 class MindMapNodeViewSet(ModelViewSet):

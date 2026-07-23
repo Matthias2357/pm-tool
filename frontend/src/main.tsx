@@ -1,67 +1,1322 @@
-import React from "react";
+import React, { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { CalendarDays, FileText, GitBranch, KanbanSquare, LayoutDashboard, ListChecks } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarDays,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  Download,
+  File as FileIcon,
+  FileText,
+  Folder,
+  GitBranch,
+  Image,
+  KanbanSquare,
+  LayoutDashboard,
+  ListChecks,
+  Loader2,
+  Menu,
+  Pencil,
+  Plus,
+  Settings,
+  Upload,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import "./styles.css";
 
-const modules = [
-  { title: "Kanban", icon: KanbanSquare, text: "Tickets nach Status, Epic und Phase steuern." },
-  { title: "Timeline", icon: CalendarDays, text: "Start- und Faelligkeitsdaten chronologisch planen." },
-  { title: "Mind-Map", icon: GitBranch, text: "Themen verbinden und daraus Tickets erzeugen." },
-  { title: "Fortschritt", icon: LayoutDashboard, text: "Kritische Elemente und Projektstand sehen." },
-  { title: "Eisenhower", icon: ListChecks, text: "Aufgaben nach Wichtigkeit und Dringlichkeit sortieren." },
-  { title: "Dokumente", icon: FileText, text: "Ticket-Dokumente, Protokolle und Vertraege sammeln." },
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(/\/$/, "");
+
+type View = "dashboard" | "kanban" | "timeline" | "mindmap" | "methodology" | "documents";
+type TicketStatus = "backlog" | "todo" | "in_progress" | "review" | "done";
+type Criticality = "normal" | "warning" | "critical";
+
+interface Project {
+  id: number;
+  name: string;
+  description: string;
+  is_archived: boolean;
+  phases: Phase[];
+}
+
+interface Phase {
+  id: number;
+  project: number;
+  name: string;
+  order: number;
+}
+
+interface Epic {
+  id: number;
+  project: number;
+  title: string;
+  description: string;
+  progress: number;
+}
+
+interface Ticket {
+  id: number;
+  project: number;
+  phase: number | null;
+  phase_name: string | null;
+  epic: number | null;
+  epic_title: string | null;
+  title: string;
+  description: string;
+  status: TicketStatus;
+  importance: number;
+  urgency: number;
+  progress: number;
+  starts_on: string | null;
+  due_on: string | null;
+  criticality: Criticality;
+  methodology_priority: MethodologyPriority;
+}
+
+type MethodologyPriority = "alpha" | "beta" | "gamma" | "delta" | "unprioritized";
+
+interface TicketDraft {
+  title: string;
+  description: string;
+  status: TicketStatus;
+  phase: string;
+  epic: string;
+  due_on: string;
+  importance: number;
+  urgency: number;
+  progress: number;
+  criticality: Criticality;
+}
+
+type DocumentKind = "image" | "pdf" | "word" | "other";
+
+interface DocumentAttachment {
+  id: number;
+  project: number;
+  entry: number;
+  title: string;
+  file: string;
+  file_url: string;
+  file_name: string;
+  file_kind: DocumentKind;
+  file_size: number;
+}
+
+interface DocumentEntry {
+  id: number;
+  block: number;
+  name: string;
+  entry_date: string;
+  notes: string;
+  documents: DocumentAttachment[];
+}
+
+interface DocumentBlock {
+  id: number;
+  project: number;
+  name: string;
+  description: string;
+  order: number;
+  entries: DocumentEntry[];
+}
+
+const emptyTicket: TicketDraft = {
+  title: "",
+  description: "",
+  status: "backlog",
+  phase: "",
+  epic: "",
+  due_on: "",
+  importance: -1,
+  urgency: -1,
+  progress: 0,
+  criticality: "normal",
+};
+
+const columns: { status: TicketStatus; label: string; accent: string }[] = [
+  { status: "backlog", label: "Backlog", accent: "#64748b" },
+  { status: "todo", label: "To-do", accent: "#3b82f6" },
+  { status: "in_progress", label: "In Bearbeitung", accent: "#7c3aed" },
+  { status: "review", label: "Review", accent: "#c026d3" },
+  { status: "done", label: "Erledigt", accent: "#e5484d" },
 ];
 
+const navigation: { id: View; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
+  { id: "dashboard", label: "Übersicht", icon: LayoutDashboard },
+  { id: "kanban", label: "Kanban", icon: KanbanSquare },
+  { id: "timeline", label: "Timeline", icon: CalendarDays },
+  { id: "mindmap", label: "Mind-Map", icon: GitBranch },
+  { id: "methodology", label: "Methodik", icon: ListChecks },
+  { id: "documents", label: "Dokumente", icon: FileText },
+];
+
+async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  const isFormData = options?.body instanceof FormData;
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: { ...(isFormData ? {} : { "Content-Type": "application/json" }), ...options?.headers },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const detail = body?.detail ?? Object.values(body ?? {}).flat().join(" ") ?? "";
+    throw new Error(detail || `API-Fehler ${response.status}`);
+  }
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
+}
+
+function unpack<T>(data: T[] | { results: T[] }): T[] {
+  return Array.isArray(data) ? data : data.results;
+}
+
 function App() {
+  const [view, setView] = useState<View>("dashboard");
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState<number | null>(null);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [epics, setEpics] = useState<Epic[]>([]);
+  const [documentBlocks, setDocumentBlocks] = useState<DocumentBlock[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [projectDialog, setProjectDialog] = useState(false);
+  const [editProjectDialog, setEditProjectDialog] = useState(false);
+  const [ticketDialog, setTicketDialog] = useState(false);
+  const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
+  const [ticketDraft, setTicketDraft] = useState<TicketDraft>(emptyTicket);
+  const [blockDialog, setBlockDialog] = useState(false);
+  const [editBlock, setEditBlock] = useState<DocumentBlock | null>(null);
+  const [entryDialogBlock, setEntryDialogBlock] = useState<DocumentBlock | null>(null);
+  const [uploadEntry, setUploadEntry] = useState<DocumentEntry | null>(null);
+  const [previewDocument, setPreviewDocument] = useState<DocumentAttachment | null>(null);
+
+  const project = projects.find((item) => item.id === projectId) ?? null;
+
+  const loadProjects = useCallback(async () => {
+    const data = await api<Project[] | { results: Project[] }>("/projects/?archived=false");
+    const list = unpack(data);
+    setProjects(list);
+    setProjectId((current) => current ?? list[0]?.id ?? null);
+  }, []);
+
+  const loadBoard = useCallback(async (selectedProject: number) => {
+    const [ticketData, epicData, blockData] = await Promise.all([
+      api<Ticket[] | { results: Ticket[] }>(`/tickets/?project=${selectedProject}`),
+      api<Epic[] | { results: Epic[] }>(`/epics/?project=${selectedProject}`),
+      api<DocumentBlock[] | { results: DocumentBlock[] }>(`/document-blocks/?project=${selectedProject}`),
+    ]);
+    setTickets(unpack(ticketData));
+    setEpics(unpack(epicData));
+    setDocumentBlocks(unpack(blockData));
+  }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    loadProjects()
+      .catch((reason: Error) => setError(reason.message))
+      .finally(() => setLoading(false));
+  }, [loadProjects]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setTickets([]);
+      setEpics([]);
+      return;
+    }
+    setLoading(true);
+    setError("");
+    loadBoard(projectId)
+      .catch((reason: Error) => setError(reason.message))
+      .finally(() => setLoading(false));
+  }, [projectId, loadBoard]);
+
+  const stats = useMemo(() => {
+    const active = tickets.filter((ticket) => ticket.status !== "done").length;
+    const done = tickets.filter((ticket) => ticket.status === "done").length;
+    const critical = tickets.filter((ticket) => isCritical(ticket)).length;
+    const progress = tickets.length ? Math.round((done / tickets.length) * 100) : 0;
+    return { active, done, critical, progress };
+  }, [tickets]);
+
+  function isCritical(ticket: Ticket) {
+    return (
+      ticket.criticality !== "normal" ||
+      (ticket.due_on !== null && ticket.status !== "done" && ticket.due_on < new Date().toISOString().slice(0, 10))
+    );
+  }
+
+  async function createProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setError("");
+    try {
+      const created = await api<Project>("/projects/", {
+        method: "POST",
+        body: JSON.stringify({ name: form.get("name"), description: form.get("description") }),
+      });
+      await loadProjects();
+      setProjectId(created.id);
+      setProjectDialog(false);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  async function updateProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!project) return;
+    const form = new FormData(event.currentTarget);
+    try {
+      await api<Project>(`/projects/${project.id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: form.get("name"), description: form.get("description") }),
+      });
+      await loadProjects();
+      setEditProjectDialog(false);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  function openNewTicket(status: TicketStatus = "backlog") {
+    setEditingTicket(null);
+    setTicketDraft({ ...emptyTicket, status });
+    setTicketDialog(true);
+  }
+
+  function openTicket(ticket: Ticket) {
+    setEditingTicket(ticket);
+    setTicketDraft({
+      title: ticket.title,
+      description: ticket.description,
+      status: ticket.status,
+      phase: ticket.phase?.toString() ?? "",
+      epic: ticket.epic?.toString() ?? "",
+      due_on: ticket.due_on ?? "",
+      importance: ticket.importance,
+      urgency: ticket.urgency,
+      progress: ticket.progress,
+      criticality: ticket.criticality,
+    });
+    setTicketDialog(true);
+  }
+
+  async function saveTicket(event: FormEvent) {
+    event.preventDefault();
+    if (!projectId) return;
+    const payload = {
+      ...ticketDraft,
+      project: projectId,
+      phase: ticketDraft.phase ? Number(ticketDraft.phase) : null,
+      epic: ticketDraft.epic ? Number(ticketDraft.epic) : null,
+      due_on: ticketDraft.due_on || null,
+    };
+    setError("");
+    try {
+      await api<Ticket>(editingTicket ? `/tickets/${editingTicket.id}/` : "/tickets/", {
+        method: editingTicket ? "PUT" : "POST",
+        body: JSON.stringify(payload),
+      });
+      await loadBoard(projectId);
+      setTicketDialog(false);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  async function moveTicket(ticketId: number, status: TicketStatus) {
+    const original = tickets;
+    setTickets((current) => current.map((ticket) => (ticket.id === ticketId ? { ...ticket, status } : ticket)));
+    try {
+      await api<Ticket>(`/tickets/${ticketId}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+    } catch (reason) {
+      setTickets(original);
+      setError((reason as Error).message);
+    }
+  }
+
+  async function reprioritizeTicket(ticketId: number, priority: MethodologyPriority) {
+    const values: Record<MethodologyPriority, { importance: number; urgency: number }> = {
+      alpha: { importance: 4, urgency: 4 },
+      beta: { importance: 1, urgency: 4 },
+      gamma: { importance: 4, urgency: 1 },
+      delta: { importance: 1, urgency: 1 },
+      unprioritized: { importance: -1, urgency: -1 },
+    };
+    const original = tickets;
+    const update = values[priority];
+    setTickets((current) =>
+      current.map((ticket) =>
+        ticket.id === ticketId ? { ...ticket, ...update, methodology_priority: priority } : ticket,
+      ),
+    );
+    try {
+      await api<Ticket>(`/tickets/${ticketId}/`, {
+        method: "PATCH",
+        body: JSON.stringify(update),
+      });
+    } catch (reason) {
+      setTickets(original);
+      setError((reason as Error).message);
+    }
+  }
+
+  async function deleteTicket() {
+    if (!editingTicket || !projectId || !window.confirm(`„${editingTicket.title}“ wirklich löschen?`)) return;
+    try {
+      await api<void>(`/tickets/${editingTicket.id}/`, { method: "DELETE" });
+      await loadBoard(projectId);
+      setTicketDialog(false);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  async function createDocumentBlock(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!projectId) return;
+    const form = new FormData(event.currentTarget);
+    try {
+      await api<DocumentBlock>("/document-blocks/", {
+        method: "POST",
+        body: JSON.stringify({
+          project: projectId,
+          name: form.get("name"),
+          description: form.get("description"),
+        }),
+      });
+      await loadBoard(projectId);
+      setBlockDialog(false);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  async function updateDocumentBlock(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!projectId || !editBlock) return;
+    const form = new FormData(event.currentTarget);
+    try {
+      await api<DocumentBlock>(`/document-blocks/${editBlock.id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: form.get("name"), description: form.get("description") }),
+      });
+      await loadBoard(projectId);
+      setEditBlock(null);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  async function createDocumentEntry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!projectId || !entryDialogBlock) return;
+    const form = new FormData(event.currentTarget);
+    const files = form.getAll("files").filter((item): item is File => item instanceof File && item.size > 0);
+    try {
+      const entry = await api<DocumentEntry>("/document-entries/", {
+        method: "POST",
+        body: JSON.stringify({
+          block: entryDialogBlock.id,
+          name: form.get("name"),
+          entry_date: form.get("entry_date"),
+          notes: form.get("notes"),
+        }),
+      });
+      for (const file of files) {
+        const upload = new FormData();
+        upload.append("project", String(projectId));
+        upload.append("entry", String(entry.id));
+        upload.append("title", file.name.replace(/\.[^.]+$/, ""));
+        upload.append("document_type", "other");
+        upload.append("file", file);
+        await api<DocumentAttachment>("/documents/", { method: "POST", body: upload });
+      }
+      await loadBoard(projectId);
+      setEntryDialogBlock(null);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  async function addDocuments(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!projectId || !uploadEntry) return;
+    const form = new FormData(event.currentTarget);
+    const files = form.getAll("files").filter((item): item is File => item instanceof File && item.size > 0);
+    if (!files.length) {
+      setError("Bitte wähle mindestens eine Datei aus.");
+      return;
+    }
+    try {
+      for (const file of files) {
+        const upload = new FormData();
+        upload.append("project", String(projectId));
+        upload.append("entry", String(uploadEntry.id));
+        upload.append("title", file.name.replace(/\.[^.]+$/, ""));
+        upload.append("document_type", "other");
+        upload.append("file", file);
+        await api<DocumentAttachment>("/documents/", { method: "POST", body: upload });
+      }
+      await loadBoard(projectId);
+      setUploadEntry(null);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
   return (
-    <main className="shell">
-      <section className="topbar">
-        <div>
-          <p className="eyebrow">PM Tool</p>
-          <h1>Projektarbeit fuer Verein und Planung</h1>
+    <div className="app-shell">
+      <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
+        <div className="brand">
+          <div className="brand-mark">PM</div>
+          <div>
+            <strong>PM Tool</strong>
+            <span>Vereinsarbeit</span>
+          </div>
+          <button className="icon-button mobile-only" onClick={() => setSidebarOpen(false)} aria-label="Menü schließen">
+            <X size={20} />
+          </button>
         </div>
-        <a className="api-link" href={`${import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api"}/`} target="_blank" rel="noreferrer">
-          API oeffnen
-        </a>
-      </section>
 
-      <section className="status-grid" aria-label="Projektstatus">
-        <div>
-          <span>Phase</span>
-          <strong>Startup Phase</strong>
-        </div>
-        <div>
-          <span>Tickets</span>
-          <strong>0 aktiv</strong>
-        </div>
-        <div>
-          <span>Dokumente</span>
-          <strong>0 erfasst</strong>
-        </div>
-        <div>
-          <span>Kritisch</span>
-          <strong>0 Warnungen</strong>
-        </div>
-      </section>
+        <nav>
+          <span className="nav-heading">Arbeitsbereiche</span>
+          {navigation.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                className={view === item.id ? "nav-item active" : "nav-item"}
+                key={item.id}
+                onClick={() => {
+                  setView(item.id);
+                  setSidebarOpen(false);
+                }}
+              >
+                <Icon size={19} />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
 
-      <section className="module-grid" aria-label="Arbeitsbereiche">
-        {modules.map((module) => {
-          const Icon = module.icon;
+        <div className="sidebar-footer">
+          <a href={`${API_BASE}/`} target="_blank" rel="noreferrer">
+            <Settings size={17} />
+            API-Verwaltung
+          </a>
+          <span>Daten: ~/pm-tool-contents</span>
+        </div>
+      </aside>
+
+      <main className="workspace">
+        <header className="workspace-header">
+          <button className="icon-button menu-button" onClick={() => setSidebarOpen(true)} aria-label="Menü öffnen">
+            <Menu size={22} />
+          </button>
+          <div className="project-select-wrap">
+            <label htmlFor="project-select">Aktuelles Projekt</label>
+            <div className="select-control">
+              <select
+                id="project-select"
+                value={projectId ?? ""}
+                onChange={(event) => setProjectId(event.target.value ? Number(event.target.value) : null)}
+              >
+                {!projects.length && <option value="">Noch kein Projekt</option>}
+                {projects.map((item) => (
+                  <option value={item.id} key={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={16} />
+            </div>
+          </div>
+          <button className="button secondary" onClick={() => setProjectDialog(true)}>
+            <Plus size={17} /> Projekt
+          </button>
+          <button className="icon-button header-edit-button" onClick={() => setEditProjectDialog(true)} disabled={!project} aria-label="Aktuelles Projekt bearbeiten">
+            <Pencil size={17} />
+          </button>
+          <button className="button primary" onClick={() => openNewTicket()} disabled={!project}>
+            <Plus size={17} /> Ticket
+          </button>
+        </header>
+
+        {error && (
+          <div className="error-banner">
+            <AlertTriangle size={18} />
+            <span>{error}</span>
+            <button onClick={() => setError("")} aria-label="Fehler schließen"><X size={17} /></button>
+          </div>
+        )}
+
+        {loading && !projects.length ? (
+          <div className="center-state"><Loader2 className="spin" /> Daten werden geladen …</div>
+        ) : !project ? (
+          <EmptyProject onCreate={() => setProjectDialog(true)} />
+        ) : view === "dashboard" ? (
+          <Dashboard project={project} tickets={tickets} stats={stats} onOpenKanban={() => setView("kanban")} />
+        ) : view === "kanban" ? (
+          <Kanban
+            tickets={tickets}
+            onOpen={openTicket}
+            onCreate={openNewTicket}
+            onMove={moveTicket}
+            critical={isCritical}
+          />
+        ) : view === "methodology" ? (
+          <Methodology
+            tickets={tickets}
+            onOpen={openTicket}
+            onCreate={() => openNewTicket()}
+            onReprioritize={reprioritizeTicket}
+          />
+        ) : view === "documents" ? (
+          <Documents
+            blocks={documentBlocks}
+            onCreateBlock={() => setBlockDialog(true)}
+            onEditBlock={setEditBlock}
+            onCreateEntry={setEntryDialogBlock}
+            onAddDocuments={setUploadEntry}
+            onPreview={setPreviewDocument}
+          />
+        ) : (
+          <ComingSoon view={view} onKanban={() => setView("kanban")} />
+        )}
+      </main>
+
+      {projectDialog && (
+        <Modal title="Neues Projekt" onClose={() => setProjectDialog(false)}>
+          <form className="form" onSubmit={createProject}>
+            <label>
+              Projektname
+              <input name="name" required autoFocus maxLength={200} placeholder="z. B. Vereinsfest 2027" />
+            </label>
+            <label>
+              Beschreibung
+              <textarea name="description" rows={4} placeholder="Ziel und Rahmen des Projekts" />
+            </label>
+            <p className="form-hint">Die vier Phasen Startup, Grobplanung, Detailplanung und Umsetzung werden automatisch angelegt.</p>
+            <div className="dialog-actions">
+              <button type="button" className="button ghost" onClick={() => setProjectDialog(false)}>Abbrechen</button>
+              <button className="button primary" type="submit">Projekt anlegen</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {editProjectDialog && project && (
+        <Modal title="Projekt bearbeiten" onClose={() => setEditProjectDialog(false)}>
+          <form className="form" onSubmit={updateProject}>
+            <label>
+              Projektname
+              <input name="name" required autoFocus maxLength={200} defaultValue={project.name} />
+            </label>
+            <label>
+              Beschreibung
+              <textarea name="description" rows={4} defaultValue={project.description} />
+            </label>
+            <div className="dialog-actions">
+              <button type="button" className="button ghost" onClick={() => setEditProjectDialog(false)}>Abbrechen</button>
+              <button className="button primary" type="submit">Änderungen speichern</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {ticketDialog && project && (
+        <Modal title={editingTicket ? "Ticket bearbeiten" : "Neues Ticket"} onClose={() => setTicketDialog(false)} wide>
+          <form className="form ticket-form" onSubmit={saveTicket}>
+            <label className="full">
+              Titel
+              <input
+                required
+                autoFocus
+                maxLength={200}
+                value={ticketDraft.title}
+                onChange={(event) => setTicketDraft({ ...ticketDraft, title: event.target.value })}
+                placeholder="Was ist zu erledigen?"
+              />
+            </label>
+            <label className="full">
+              Beschreibung
+              <textarea
+                rows={4}
+                value={ticketDraft.description}
+                onChange={(event) => setTicketDraft({ ...ticketDraft, description: event.target.value })}
+                placeholder="Details, Ergebnis und nächste Schritte"
+              />
+            </label>
+            <label>
+              Status
+              <select value={ticketDraft.status} onChange={(event) => setTicketDraft({ ...ticketDraft, status: event.target.value as TicketStatus })}>
+                {columns.map((column) => <option value={column.status} key={column.status}>{column.label}</option>)}
+              </select>
+            </label>
+            <label>
+              Phase
+              <select value={ticketDraft.phase} onChange={(event) => setTicketDraft({ ...ticketDraft, phase: event.target.value })}>
+                <option value="">Keine Phase</option>
+                {project.phases.map((phase) => <option value={phase.id} key={phase.id}>{phase.name}</option>)}
+              </select>
+            </label>
+            <label>
+              Epic
+              <select value={ticketDraft.epic} onChange={(event) => setTicketDraft({ ...ticketDraft, epic: event.target.value })}>
+                <option value="">Kein Epic</option>
+                {epics.map((epic) => <option value={epic.id} key={epic.id}>{epic.title}</option>)}
+              </select>
+            </label>
+            <label>
+              Fällig am
+              <input type="date" value={ticketDraft.due_on} onChange={(event) => setTicketDraft({ ...ticketDraft, due_on: event.target.value })} />
+            </label>
+            <label>
+              Wichtigkeit
+              <select value={ticketDraft.importance} onChange={(event) => setTicketDraft({ ...ticketDraft, importance: Number(event.target.value) })}>
+                <option value={-1}>Noch nicht bewertet</option>
+                <option value={1}>1 · niedrig</option>
+                <option value={2}>2 · eher niedrig</option>
+                <option value={3}>3 · wichtig</option>
+                <option value={4}>4 · sehr wichtig</option>
+              </select>
+            </label>
+            <label>
+              Dringlichkeit
+              <select value={ticketDraft.urgency} onChange={(event) => setTicketDraft({ ...ticketDraft, urgency: Number(event.target.value) })}>
+                <option value={-1}>Noch nicht bewertet</option>
+                <option value={1}>1 · niedrig</option>
+                <option value={2}>2 · eher niedrig</option>
+                <option value={3}>3 · dringend</option>
+                <option value={4}>4 · sehr dringend</option>
+              </select>
+            </label>
+            <label>
+              Fortschritt in %
+              <input type="number" min={0} max={100} value={ticketDraft.progress} onChange={(event) => setTicketDraft({ ...ticketDraft, progress: Number(event.target.value) })} />
+            </label>
+            <label>
+              Kritikalität
+              <select value={ticketDraft.criticality} onChange={(event) => setTicketDraft({ ...ticketDraft, criticality: event.target.value as Criticality })}>
+                <option value="normal">Normal</option>
+                <option value="warning">Warnung</option>
+                <option value="critical">Kritisch</option>
+              </select>
+            </label>
+            <div className="dialog-actions full split-actions">
+              <div>{editingTicket && <button type="button" className="button danger" onClick={deleteTicket}>Löschen</button>}</div>
+              <div>
+                <button type="button" className="button ghost" onClick={() => setTicketDialog(false)}>Abbrechen</button>
+                <button className="button primary" type="submit">Speichern</button>
+              </div>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {blockDialog && (
+        <Modal title="Thematischen Block erstellen" onClose={() => setBlockDialog(false)}>
+          <form className="form" onSubmit={createDocumentBlock}>
+            <label>
+              Name des Blocks
+              <input name="name" required autoFocus maxLength={200} placeholder="z. B. Festausschusssitzungen" />
+            </label>
+            <label>
+              Beschreibung (optional)
+              <textarea name="description" rows={3} placeholder="Welche Einträge werden hier gesammelt?" />
+            </label>
+            <div className="dialog-actions">
+              <button type="button" className="button ghost" onClick={() => setBlockDialog(false)}>Abbrechen</button>
+              <button className="button primary" type="submit">Block erstellen</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {editBlock && (
+        <Modal title="Thematischen Block bearbeiten" onClose={() => setEditBlock(null)}>
+          <form className="form" onSubmit={updateDocumentBlock}>
+            <label>
+              Name des Blocks
+              <input name="name" required autoFocus maxLength={200} defaultValue={editBlock.name} />
+            </label>
+            <label>
+              Beschreibung
+              <textarea name="description" rows={3} defaultValue={editBlock.description} />
+            </label>
+            <div className="dialog-actions">
+              <button type="button" className="button ghost" onClick={() => setEditBlock(null)}>Abbrechen</button>
+              <button className="button primary" type="submit">Änderungen speichern</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {entryDialogBlock && (
+        <Modal title={`Neuer Eintrag · ${entryDialogBlock.name}`} onClose={() => setEntryDialogBlock(null)} wide>
+          <form className="form" onSubmit={createDocumentEntry}>
+            <label>
+              Name
+              <input name="name" required autoFocus maxLength={200} placeholder="z. B. Sitzungsprotokoll" />
+            </label>
+            <label>
+              Datum
+              <GermanDatePicker name="entry_date" />
+            </label>
+            <label>
+              Notiz
+              <textarea name="notes" rows={4} placeholder="Kurze Zusammenfassung des Inhalts" />
+            </label>
+            <label className="file-picker">
+              <Upload size={22} />
+              <span><strong>Dokumente auswählen</strong>PDF, Word oder Bilder · mehrere Dateien möglich</span>
+              <input
+                name="files"
+                type="file"
+                multiple
+                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.webp"
+              />
+            </label>
+            <div className="dialog-actions">
+              <button type="button" className="button ghost" onClick={() => setEntryDialogBlock(null)}>Abbrechen</button>
+              <button className="button primary" type="submit">Eintrag speichern</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {previewDocument && (
+        <DocumentPreview document={previewDocument} onClose={() => setPreviewDocument(null)} />
+      )}
+
+      {uploadEntry && (
+        <Modal title={`Dokumente hinzufügen · ${uploadEntry.name}`} onClose={() => setUploadEntry(null)}>
+          <form className="form" onSubmit={addDocuments}>
+            <label className="file-picker">
+              <Upload size={22} />
+              <span><strong>Dokumente auswählen</strong>PDF, Word oder Bilder · mehrere Dateien möglich</span>
+              <input
+                name="files"
+                type="file"
+                required
+                multiple
+                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.webp"
+              />
+            </label>
+            <div className="dialog-actions">
+              <button type="button" className="button ghost" onClick={() => setUploadEntry(null)}>Abbrechen</button>
+              <button className="button primary" type="submit"><Upload size={16} /> Hochladen</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function Dashboard({
+  project,
+  tickets,
+  stats,
+  onOpenKanban,
+}: {
+  project: Project;
+  tickets: Ticket[];
+  stats: { active: number; done: number; critical: number; progress: number };
+  onOpenKanban: () => void;
+}) {
+  const recent = tickets.slice(0, 5);
+  return (
+    <div className="page">
+      <div className="page-heading">
+        <div><span className="eyebrow">Projektübersicht</span><h1>{project.name}</h1><p>{project.description || "Noch keine Projektbeschreibung hinterlegt."}</p></div>
+        <button className="button secondary" onClick={onOpenKanban}>Kanban öffnen</button>
+      </div>
+      <section className="stat-grid">
+        <Stat label="Aktive Tickets" value={stats.active} note={`${stats.done} erledigt`} />
+        <Stat label="Fortschritt" value={`${stats.progress} %`} note="nach erledigten Tickets" />
+        <Stat label="Kritische Elemente" value={stats.critical} note={stats.critical ? "Handlungsbedarf" : "Alles im Plan"} warning={stats.critical > 0} />
+        <Stat label="Projektphasen" value={project.phases.length} note="von Startup bis Umsetzung" />
+      </section>
+      <section className="content-card">
+        <div className="card-heading"><div><h2>Aktuelle Tickets</h2><p>Die zuletzt relevanten Aufgaben im Projekt.</p></div></div>
+        {recent.length ? (
+          <div className="ticket-list">
+            {recent.map((ticket) => (
+              <div key={ticket.id}><span className={`status-dot ${ticket.status}`} /><strong>{ticket.title}</strong><span>{ticket.phase_name ?? "Ohne Phase"}</span><span>{ticket.progress} %</span></div>
+            ))}
+          </div>
+        ) : <div className="empty-inline">Noch keine Tickets vorhanden. Öffne das Kanban-Board und lege das erste Ticket an.</div>}
+      </section>
+    </div>
+  );
+}
+
+function Stat({ label, value, note, warning = false }: { label: string; value: string | number; note: string; warning?: boolean }) {
+  return <div className={`stat-card ${warning ? "warning" : ""}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>;
+}
+
+function Kanban({
+  tickets,
+  onOpen,
+  onCreate,
+  onMove,
+  critical,
+}: {
+  tickets: Ticket[];
+  onOpen: (ticket: Ticket) => void;
+  onCreate: (status: TicketStatus) => void;
+  onMove: (id: number, status: TicketStatus) => void;
+  critical: (ticket: Ticket) => boolean;
+}) {
+  return (
+    <div className="page kanban-page">
+      <div className="page-heading compact"><div><span className="eyebrow">Arbeitsbereich</span><h1>Kanban-Board</h1><p>Ziehe Karten in eine andere Spalte oder öffne sie zum Bearbeiten.</p></div></div>
+      <div className="board">
+        {columns.map((column) => {
+          const items = tickets.filter((ticket) => ticket.status === column.status);
           return (
-            <article className="module" key={module.title}>
-              <Icon aria-hidden="true" size={22} />
-              <h2>{module.title}</h2>
-              <p>{module.text}</p>
-            </article>
+            <section
+              className="board-column"
+              key={column.status}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                const id = Number(event.dataTransfer.getData("text/ticket-id"));
+                if (id) onMove(id, column.status);
+              }}
+            >
+              <header style={{ borderTopColor: column.accent }}>
+                <div><h2>{column.label}</h2><span>{items.length}</span></div>
+                <button onClick={() => onCreate(column.status)} aria-label={`Ticket in ${column.label} anlegen`}><Plus size={18} /></button>
+              </header>
+              <div className="column-body">
+                {items.map((ticket) => (
+                  <button
+                    className={`ticket-card ${critical(ticket) ? "ticket-critical" : ""}`}
+                    key={ticket.id}
+                    draggable
+                    onDragStart={(event) => event.dataTransfer.setData("text/ticket-id", String(ticket.id))}
+                    onClick={() => onOpen(ticket)}
+                  >
+                    <div className="ticket-card-top">
+                      {ticket.epic_title && <span className="epic-label">{ticket.epic_title}</span>}
+                      {critical(ticket) && <AlertTriangle size={16} />}
+                    </div>
+                    <strong>{ticket.title}</strong>
+                    {ticket.description && <p>{ticket.description}</p>}
+                    <div className="ticket-meta">
+                      <span>{ticket.phase_name ?? "Ohne Phase"}</span>
+                      {ticket.due_on && <span><CalendarDays size={13} /> {new Date(`${ticket.due_on}T00:00:00`).toLocaleDateString("de-DE")}</span>}
+                    </div>
+                    <div className="progress"><span style={{ width: `${ticket.progress}%` }} /></div>
+                  </button>
+                ))}
+                {!items.length && <div className="column-empty">Karte hierher ziehen</div>}
+              </div>
+            </section>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+const priorityInfo: Record<MethodologyPriority, { label: string; combination: string; className: string }> = {
+  alpha: { label: "Alpha", combination: "Wichtig und dringend", className: "priority-alpha" },
+  beta: { label: "Beta", combination: "Nicht wichtig und dringend", className: "priority-beta" },
+  gamma: { label: "Gamma", combination: "Wichtig und nicht dringend", className: "priority-gamma" },
+  delta: { label: "Delta", combination: "Nicht wichtig und nicht dringend", className: "priority-delta" },
+  unprioritized: { label: "Noch ohne Prio", combination: "Wichtigkeit und Dringlichkeit noch nicht bewertet", className: "priority-unprioritized" },
+};
+
+function Methodology({
+  tickets,
+  onOpen,
+  onCreate,
+  onReprioritize,
+}: {
+  tickets: Ticket[];
+  onOpen: (ticket: Ticket) => void;
+  onCreate: () => void;
+  onReprioritize: (id: number, priority: MethodologyPriority) => void;
+}) {
+  return (
+    <div className="page methodology-page">
+      <div className="page-heading">
+        <div>
+          <span className="eyebrow">Projektmanagement-Wissen</span>
+          <h1>Methodik</h1>
+          <p>Methoden dokumentieren, vergleichen und direkt auf die Aufgaben des aktuellen Projekts anwenden.</p>
+        </div>
+        <button className="button primary" onClick={onCreate}><Plus size={17} /> Ticket</button>
+      </div>
+
+      <section className="method-intro">
+        <div>
+          <span className="method-number">01</span>
+          <div>
+            <h2>Eisenhower-Matrix</h2>
+            <p>Aufgaben werden anhand der beiden Dimensionen Wichtigkeit und Dringlichkeit priorisiert.</p>
+          </div>
+        </div>
+        <div className="gamma-rule">
+          <AlertTriangle size={19} />
+          <p><strong>Persönliche Gamma-Regel:</strong> Gamma-Aufgaben werden zunächst nicht erledigt. Sie werden regelmäßig neu bewertet und erst bearbeitet, wenn sie dringend und damit zu Alpha-Aufgaben werden.</p>
+        </div>
       </section>
-    </main>
+
+      <div className="methodology-layout">
+        <section className="matrix-card personal-matrix-card">
+          <header>
+            <div><span className="matrix-kicker">Im PM-Tool aktiv</span><h2>Individuelle Eisenhower-Matrix</h2></div>
+            <p>Alpha bis Delta</p>
+          </header>
+          <p className="matrix-help">Ziehe Tickets in einen Quadranten, um Wichtigkeit und Dringlichkeit zu ändern.</p>
+          <div className="unprioritized-pool">
+            <PriorityQuadrant priority="unprioritized" tickets={tickets} onOpen={onOpen} onDrop={onReprioritize} />
+          </div>
+          <div className="matrix-axis-label top">Dringlichkeit →</div>
+          <div className="personal-matrix">
+            <div className="matrix-corner" />
+            <div className="axis-heading">Dringend</div>
+            <div className="axis-heading">Nicht dringend</div>
+            <div className="axis-heading vertical">Wichtig</div>
+            <PriorityQuadrant priority="alpha" tickets={tickets} onOpen={onOpen} onDrop={onReprioritize} />
+            <PriorityQuadrant priority="gamma" tickets={tickets} onOpen={onOpen} onDrop={onReprioritize} />
+            <div className="axis-heading vertical">Nicht wichtig</div>
+            <PriorityQuadrant priority="beta" tickets={tickets} onOpen={onOpen} onDrop={onReprioritize} />
+            <PriorityQuadrant priority="delta" tickets={tickets} onOpen={onOpen} onDrop={onReprioritize} />
+          </div>
+          <div className="matrix-axis-label side">Wichtigkeit ↑</div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function PriorityQuadrant({
+  priority,
+  tickets,
+  onOpen,
+  onDrop,
+}: {
+  priority: MethodologyPriority;
+  tickets: Ticket[];
+  onOpen: (ticket: Ticket) => void;
+  onDrop: (id: number, priority: MethodologyPriority) => void;
+}) {
+  const info = priorityInfo[priority];
+  const items = tickets.filter((ticket) => ticket.methodology_priority === priority);
+  return (
+    <div
+      className={`priority-quadrant ${info.className}`}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        const id = Number(event.dataTransfer.getData("text/ticket-id"));
+        if (id) onDrop(id, priority);
+      }}
+    >
+      <header><div><strong>{info.label}</strong><span>{info.combination}</span></div><b>{items.length}</b></header>
+      <div className="priority-ticket-list">
+        {items.map((ticket) => (
+          <button
+            key={ticket.id}
+            draggable
+            onDragStart={(event) => event.dataTransfer.setData("text/ticket-id", String(ticket.id))}
+            onClick={() => onOpen(ticket)}
+          >
+            <span>{ticket.title}</span>
+            {ticket.due_on && <small><CalendarDays size={12} /> {new Date(`${ticket.due_on}T00:00:00`).toLocaleDateString("de-DE")}</small>}
+          </button>
+        ))}
+        {!items.length && <div className="priority-empty">Ticket hierher ziehen</div>}
+      </div>
+    </div>
+  );
+}
+
+function Documents({
+  blocks,
+  onCreateBlock,
+  onEditBlock,
+  onCreateEntry,
+  onAddDocuments,
+  onPreview,
+}: {
+  blocks: DocumentBlock[];
+  onCreateBlock: () => void;
+  onEditBlock: (block: DocumentBlock) => void;
+  onCreateEntry: (block: DocumentBlock) => void;
+  onAddDocuments: (entry: DocumentEntry) => void;
+  onPreview: (document: DocumentAttachment) => void;
+}) {
+  const [openBlocks, setOpenBlocks] = useState<Set<number>>(() => new Set(blocks.map((block) => block.id)));
+  const [openEntries, setOpenEntries] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    setOpenBlocks((current) => {
+      const next = new Set(current);
+      blocks.forEach((block) => next.add(block.id));
+      return next;
+    });
+  }, [blocks]);
+
+  function toggle(setter: React.Dispatch<React.SetStateAction<Set<number>>>, id: number) {
+    setter((current) => {
+      const next = new Set(current);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  const documentCount = blocks.reduce(
+    (sum, block) => sum + block.entries.reduce((entrySum, entry) => entrySum + entry.documents.length, 0),
+    0,
+  );
+
+  return (
+    <div className="page documents-page">
+      <div className="page-heading">
+        <div>
+          <span className="eyebrow">Projektwissen</span>
+          <h1>Dokumente</h1>
+          <p>Thematisch geordnete Sitzungen, Protokolle, Pläne und Workshop-Ergebnisse.</p>
+        </div>
+        <button className="button primary" onClick={onCreateBlock}><Plus size={17} /> Thematischer Block</button>
+      </div>
+
+      <div className="document-summary">
+        <div><Folder size={19} /><strong>{blocks.length}</strong><span>Blöcke</span></div>
+        <div><FileText size={19} /><strong>{blocks.reduce((sum, block) => sum + block.entries.length, 0)}</strong><span>Einträge</span></div>
+        <div><FileIcon size={19} /><strong>{documentCount}</strong><span>Dateien</span></div>
+        <p>Gespeichert unter <code>~/pm-tool-contents/uploads</code></p>
+      </div>
+
+      {!blocks.length ? (
+        <div className="documents-empty">
+          <div className="empty-icon"><Folder size={30} /></div>
+          <h2>Noch keine Dokumentenblöcke</h2>
+          <p>Erstelle beispielsweise „Festausschusssitzungen“ oder „Festleitersitzungen“.</p>
+          <button className="button primary" onClick={onCreateBlock}><Plus size={17} /> Ersten Block erstellen</button>
+        </div>
+      ) : (
+        <div className="document-blocks">
+          {blocks.map((block) => {
+            const isOpen = openBlocks.has(block.id);
+            const files = block.entries.reduce((sum, entry) => sum + entry.documents.length, 0);
+            return (
+              <section className="document-block" key={block.id}>
+                <header>
+                  <button className="collapse-button" onClick={() => toggle(setOpenBlocks, block.id)}>
+                    {isOpen ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+                    <span className="folder-icon"><Folder size={19} /></span>
+                    <span><strong>{block.name}</strong>{block.description && <small>{block.description}</small>}</span>
+                  </button>
+                  <div className="block-meta"><span>{block.entries.length} Einträge</span><span>{files} Dateien</span></div>
+                  <button className="icon-button block-edit-button" onClick={() => onEditBlock(block)} aria-label={`${block.name} bearbeiten`}><Pencil size={16} /></button>
+                  <button className="button secondary compact-button" onClick={() => onCreateEntry(block)}><Plus size={16} /> Eintrag</button>
+                </header>
+                {isOpen && (
+                  <div className="document-entries">
+                    {!block.entries.length && <div className="entry-empty">Noch keine Einträge in diesem Block.</div>}
+                    {block.entries.map((entry) => {
+                      const entryOpen = openEntries.has(entry.id);
+                      return (
+                        <article className="document-entry" key={entry.id}>
+                          <button className="entry-heading" onClick={() => toggle(setOpenEntries, entry.id)}>
+                            {entryOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                            <span className="entry-date">
+                              <strong>{new Date(`${entry.entry_date}T00:00:00`).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}</strong>
+                            </span>
+                            <span className="entry-title"><strong>{entry.name}</strong>{entry.notes && <small>{entry.notes}</small>}</span>
+                            <span className="attachment-count"><FileIcon size={14} /> {entry.documents.length}</span>
+                          </button>
+                          {entryOpen && (
+                            <div className="attachment-grid">
+                              {!entry.documents.length && <div className="attachment-empty">Für diesen Eintrag wurden keine Dokumente hochgeladen.</div>}
+                              {entry.documents.map((document) => (
+                                <button className="attachment-tile" key={document.id} onClick={() => onPreview(document)}>
+                                  <AttachmentThumbnail document={document} />
+                                  <span className="attachment-info">
+                                    <strong>{document.title}</strong>
+                                    <small>{document.file_name} · {formatFileSize(document.file_size)}</small>
+                                  </span>
+                                </button>
+                              ))}
+                              <button className="attachment-tile add-attachment-tile" onClick={() => onAddDocuments(entry)}>
+                                <span className="attachment-preview"><Plus size={24} /></span>
+                                <span className="attachment-info"><strong>Dokumente hinzufügen</strong><small>PDF, Word oder Bilder</small></span>
+                              </button>
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AttachmentThumbnail({ document }: { document: DocumentAttachment }) {
+  if (document.file_kind === "image") {
+    return <span className="attachment-preview image-preview"><img src={document.file_url} alt="" /></span>;
+  }
+  if (document.file_kind === "pdf") {
+    return <span className="attachment-preview pdf-preview"><FileText size={25} /><b>PDF</b></span>;
+  }
+  if (document.file_kind === "word") {
+    return <span className="attachment-preview word-preview"><FileText size={25} /><b>WORD</b></span>;
+  }
+  return <span className="attachment-preview"><FileIcon size={25} /></span>;
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function GermanDatePicker({ name }: { name: string }) {
+  const today = new Date();
+  const [value, setValue] = useState(() => toLocalIsoDate(today));
+  const [visibleMonth, setVisibleMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
+  const [open, setOpen] = useState(false);
+  const year = visibleMonth.getFullYear();
+  const month = visibleMonth.getMonth();
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells = [
+    ...Array.from({ length: firstWeekday }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
+  ];
+
+  return (
+    <div className="german-date-picker">
+      <input name={name} type="hidden" value={value} />
+      <button type="button" className="date-display" onClick={() => setOpen((current) => !current)}>
+        <CalendarDays size={17} />
+        <span>{new Date(`${value}T00:00:00`).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}</span>
+        <small>TT.MM.JJJJ</small>
+      </button>
+      {open && (
+        <div className="calendar-popover">
+          <header>
+            <button type="button" className="icon-button" onClick={() => setVisibleMonth(new Date(year, month - 1, 1))} aria-label="Vorheriger Monat"><ChevronLeft size={18} /></button>
+            <strong>{visibleMonth.toLocaleDateString("de-DE", { month: "long", year: "numeric" })}</strong>
+            <button type="button" className="icon-button" onClick={() => setVisibleMonth(new Date(year, month + 1, 1))} aria-label="Nächster Monat"><ChevronRight size={18} /></button>
+          </header>
+          <div className="calendar-grid calendar-weekdays">
+            {["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((day) => <span key={day}>{day}</span>)}
+          </div>
+          <div className="calendar-grid calendar-days">
+            {cells.map((day, index) =>
+              day === null ? <span key={`empty-${index}`} /> : (
+                <button
+                  type="button"
+                  key={day}
+                  className={value === toLocalIsoDate(new Date(year, month, day)) ? "selected" : ""}
+                  onClick={() => {
+                    setValue(toLocalIsoDate(new Date(year, month, day)));
+                    setOpen(false);
+                  }}
+                >
+                  {day}
+                </button>
+              ),
+            )}
+          </div>
+          <button
+            type="button"
+            className="calendar-today"
+            onClick={() => {
+              const now = new Date();
+              setValue(toLocalIsoDate(now));
+              setVisibleMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+              setOpen(false);
+            }}
+          >
+            Heute
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function toLocalIsoDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function DocumentPreview({ document, onClose }: { document: DocumentAttachment; onClose: () => void }) {
+  const [zoom, setZoom] = useState(1);
+  return (
+    <div className="preview-backdrop" role="dialog" aria-modal="true" aria-label={`Vorschau ${document.title}`}>
+      <header>
+        <div><strong>{document.title}</strong><span>{document.file_name} · {formatFileSize(document.file_size)}</span></div>
+        <div className="preview-actions">
+          {document.file_kind === "image" && (
+            <>
+              <button className="icon-button" onClick={() => setZoom((value) => Math.max(.5, value - .25))} aria-label="Verkleinern"><ZoomOut size={19} /></button>
+              <span>{Math.round(zoom * 100)} %</span>
+              <button className="icon-button" onClick={() => setZoom((value) => Math.min(4, value + .25))} aria-label="Vergrößern"><ZoomIn size={19} /></button>
+            </>
+          )}
+          <a className="icon-button" href={document.file_url} download={document.file_name} aria-label="Herunterladen"><Download size={19} /></a>
+          <button className="icon-button" onClick={onClose} aria-label="Vorschau schließen"><X size={21} /></button>
+        </div>
+      </header>
+      <div className="preview-stage">
+        {document.file_kind === "image" && (
+          <div className="zoom-canvas"><img src={document.file_url} alt={document.title} style={{ transform: `scale(${zoom})` }} /></div>
+        )}
+        {document.file_kind === "pdf" && <iframe src={document.file_url} title={document.title} />}
+        {document.file_kind === "word" && (
+          <div className="unsupported-preview"><FileText size={48} /><h2>Word-Dokument</h2><p>Word-Dateien können vom Browser nicht zuverlässig direkt angezeigt werden.</p><a className="button primary" href={document.file_url} download={document.file_name}><Download size={17} /> Datei herunterladen</a></div>
+        )}
+        {document.file_kind === "other" && (
+          <div className="unsupported-preview"><FileIcon size={48} /><h2>Keine Vorschau verfügbar</h2><a className="button primary" href={document.file_url} download={document.file_name}><Download size={17} /> Datei herunterladen</a></div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EmptyProject({ onCreate }: { onCreate: () => void }) {
+  return <div className="center-state empty-project"><div className="empty-icon"><KanbanSquare size={32} /></div><h1>Dein erstes Projekt</h1><p>Lege ein Projekt an. Die vorgesehenen vier Projektphasen werden automatisch erstellt.</p><button className="button primary" onClick={onCreate}><Plus size={17} /> Projekt anlegen</button></div>;
+}
+
+function ComingSoon({ view, onKanban }: { view: View; onKanban: () => void }) {
+  const item = navigation.find((entry) => entry.id === view)!;
+  const Icon = item.icon;
+  return <div className="center-state coming-soon"><div className="empty-icon"><Icon size={30} /></div><span className="eyebrow">Nächste Ausbaustufe</span><h1>{item.label}</h1><p>Dieser Bereich ist in der Navigation vorbereitet. Zuerst steht dir das vollständig gespeicherte Kanban-Board zur Verfügung.</p><button className="button primary" onClick={onKanban}>Zum Kanban-Board</button></div>;
+}
+
+function Modal({ title, onClose, wide = false, children }: { title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }) {
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className={`modal ${wide ? "modal-wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+        <header><h2>{title}</h2><button className="icon-button" onClick={onClose} aria-label="Dialog schließen"><X size={20} /></button></header>
+        {children}
+      </section>
+    </div>
   );
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
+  <React.StrictMode><App /></React.StrictMode>,
 );
