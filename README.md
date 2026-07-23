@@ -39,7 +39,8 @@ cp .env.example .env
 
 `PM_TOOL_CONTENTS_DIR` legt den Speicherort aller Nutzdaten fest. Der
 Standardwert `../pm-tool-contents` entspricht bei einem Repository unter
-`~/pm-tool` dem Ordner `~/pm-tool-contents`.
+`~/projects_and_tools/pm-tool` dem Ordner
+`~/projects_and_tools/pm-tool-contents`.
 
 3. Container starten:
 

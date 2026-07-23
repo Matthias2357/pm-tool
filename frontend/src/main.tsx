@@ -834,7 +834,7 @@ function App() {
             <Settings size={17} />
             API-Verwaltung
           </a>
-          <span>Daten: ~/pm-tool-contents</span>
+          <span>Daten: ~/projects_and_tools/pm-tool-contents</span>
         </div>
       </aside>
 
@@ -2055,7 +2055,7 @@ function Documents({
         <div><Folder size={19} /><strong>{blocks.length}</strong><span>Blöcke</span></div>
         <div><FileText size={19} /><strong>{blocks.reduce((sum, block) => sum + block.entries.length, 0)}</strong><span>Einträge</span></div>
         <div><FileIcon size={19} /><strong>{documentCount}</strong><span>Dateien</span></div>
-        <p>Gespeichert unter <code>~/pm-tool-contents/uploads</code></p>
+        <p>Gespeichert unter <code>~/projects_and_tools/pm-tool-contents/uploads</code></p>
       </div>
 
       {!blocks.length ? (
