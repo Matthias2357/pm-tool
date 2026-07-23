@@ -3,7 +3,7 @@ from rest_framework.test import APITestCase
 
 from projects.models import Phase, Project
 
-from .models import Ticket
+from .models import Epic, Ticket
 
 
 class TicketApiTests(APITestCase):
@@ -94,3 +94,20 @@ class TicketApiTests(APITestCase):
         self.assertEqual(response.data["importance"], -1)
         self.assertEqual(response.data["urgency"], -1)
         self.assertEqual(response.data["methodology_priority"], "unprioritized")
+
+    def test_epic_can_group_tickets_and_be_filtered_by_project(self):
+        epic = Epic.objects.create(project=self.project, title="Veranstaltungslogistik")
+        ticket = Ticket.objects.create(project=self.project, title="Lageplan")
+
+        response = self.client.patch(
+            f"/api/tickets/{ticket.id}/",
+            {"epic": epic.id, "status": "in_progress"},
+            format="json",
+        )
+        epic_list = self.client.get(f"/api/epics/?project={self.project.id}")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["epic"], epic.id)
+        self.assertEqual(response.data["epic_title"], "Veranstaltungslogistik")
+        self.assertEqual(epic_list.status_code, status.HTTP_200_OK)
+        self.assertEqual([item["title"] for item in epic_list.data["results"]], ["Veranstaltungslogistik"])

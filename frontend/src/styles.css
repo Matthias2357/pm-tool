@@ -69,6 +69,36 @@ button { color: inherit; }
 .status-dot.todo { background: #3b82f6; }.status-dot.in_progress { background: #d97706; }.status-dot.review { background: #8b5cf6; }.status-dot.done { background: #2f855a; }
 .empty-inline { margin-top: 18px; padding: 24px; border-radius: 8px; background: #f6f8f7; color: #708078; text-align: center; }
 
+.epic-overview-card {
+  margin-bottom: 22px;
+  padding: 20px 22px;
+  border: 1px solid #292a40;
+  border-radius: 11px;
+  background: linear-gradient(145deg, #151621, #11121c);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .13);
+}
+.epic-overview-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.epic-overview-card > header h2 { margin: 0 0 4px; color: #eeeef5; font-size: 1.05rem; }
+.epic-overview-card > header p { margin: 0; color: #7b7e92; font-size: .8rem; }
+.epic-overview-card > header > span { padding: 5px 9px; border-radius: 12px; background: #222331; color: #9295a8; font-size: .67rem; }
+.epic-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.epic-overview-item { min-width: 0; padding: 16px; border: 1px solid #2d2e45; border-radius: 10px; background: rgba(20, 21, 33, .78); }
+.epic-overview-title { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.epic-overview-title > div { min-width: 0; }
+.epic-overview-title strong { display: block; overflow: hidden; color: #eeeef5; font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }
+.epic-overview-title small { display: block; margin-top: 3px; color: #7f8297; font-size: .67rem; }
+.epic-overview-item > p { margin: 12px 0 0; color: #9295a9; font-size: .76rem; line-height: 1.45; }
+.epic-status { padding: 5px 8px; border-radius: 999px; font-size: .63rem; font-weight: 750; white-space: nowrap; }
+.epic-status.empty { background: rgba(100, 116, 139, .14); color: #94a3b8; }
+.epic-status.planned { background: rgba(59, 130, 246, .13); color: #60a5fa; }
+.epic-status.active { background: rgba(168, 85, 247, .15); color: #c084fc; }
+.epic-status.done { background: rgba(239, 68, 68, .13); color: #fb7185; }
+.epic-overview-progress { display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: center; gap: 10px; margin-top: 14px; }
+.epic-overview-progress > div { height: 5px; overflow: hidden; border-radius: 5px; background: #292a3d; }
+.epic-overview-progress > div span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #ef4444, #a855f7 55%, #3b82f6); }
+.epic-overview-progress > strong { color: #adafc1; font-size: .67rem; text-align: right; }
+.epic-unassigned-note { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: rgba(59, 130, 246, .08); color: #8e9db7; font-size: .74rem; }
+
 .overview-timeline-card {
   margin-bottom: 22px;
   padding: 20px 22px;
@@ -223,8 +253,21 @@ button { color: inherit; }
   font-size: .75rem;
 }
 
-.board { display: grid; grid-template-columns: repeat(5, minmax(250px, 1fr)); gap: 12px; padding-bottom: 18px; overflow-x: auto; }
+.epic-boards { display: grid; gap: 22px; }
+.epic-board-section { padding: 16px; border: 1px solid #2d2e44; border-radius: 12px; background: rgba(15,16,25,.68); }
+.epic-board-section.unassigned-epic { border-style: dashed; }
+.epic-board-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 14px; padding: 0 2px; }
+.epic-board-heading > div:first-child { display: flex; align-items: flex-start; gap: 11px; min-width: 0; }
+.epic-heading-icon { display: grid; flex: 0 0 36px; place-items: center; height: 36px; border-radius: 9px; background: linear-gradient(135deg, rgba(239,68,68,.16), rgba(168,85,247,.2)); color: #c084fc; }
+.epic-heading-icon.neutral { background: rgba(100,116,139,.12); color: #94a3b8; }
+.epic-board-heading h2 { margin: 2px 0 3px; color: #eeeef5; font-size: 1rem; }
+.epic-board-heading p { max-width: 720px; margin: 0; color: #85889c; font-size: .7rem; line-height: 1.4; }
+.epic-heading-meta { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+.epic-heading-meta > span { padding: 5px 8px; border-radius: 12px; background: #222331; color: #9295a8; font-size: .64rem; }
+.epic-heading-meta .icon-button { color: #aaa1c5; }
+.board { display: grid; grid-template-columns: repeat(5, minmax(250px, 1fr)); gap: 12px; padding-bottom: 4px; overflow-x: auto; }
 .board-column { min-height: calc(100vh - 195px); border: 1px solid #dde3e6; border-radius: 10px; background: #ebeff1; }
+.epic-board-section .board-column { min-height: 260px; }
 .board-column > header { display: flex; align-items: center; justify-content: space-between; height: 54px; padding: 0 12px 0 15px; border-top: 3px solid; border-radius: 9px 9px 0 0; background: #f8faf9; }
 .board-column > header > div { display: flex; align-items: center; gap: 8px; }
 .board-column h2 { margin: 0; font-size: .82rem; letter-spacing: .015em; }
@@ -296,6 +339,9 @@ button { color: inherit; }
   .error-banner { margin: 12px 14px -6px; }
   .ticket-list > div { grid-template-columns: 12px 1fr 50px; }
   .ticket-list > div span:nth-child(3) { display: none; }
+  .epic-board-heading { flex-direction: column; }
+  .epic-heading-meta { width: 100%; }
+  .epic-overview-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 520px) {
@@ -305,6 +351,8 @@ button { color: inherit; }
   .modal-backdrop { padding: 0; }
   .modal { max-height: 100vh; min-height: 100vh; border-radius: 0; }
   .modal.modal-overflow-visible { overflow-y: auto; }
+  .epic-overview-title { grid-template-columns: 36px minmax(0, 1fr); }
+  .epic-status { grid-column: 2; justify-self: start; }
 }
 
 /* Dark theme: red–violet–blue */

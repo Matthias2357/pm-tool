@@ -85,6 +85,9 @@ docker compose exec backend python manage.py create_example_project
 - `+ Ticket` erstellt eine neue Kanban-Karte.
 - Im Kanban-Board lassen sich Karten per Drag-and-drop zwischen den Spalten
   verschieben.
+- Epics gliedern das Kanban-Board in thematische Bereiche. Karten können per
+  Drag-and-drop zugleich in einen anderen Status und ein anderes Epic
+  verschoben werden; ein eigener Sammelbereich enthält Tickets ohne Epic.
 - Ein Klick auf eine Karte öffnet alle Details zum Bearbeiten oder Löschen.
 - In der Timeline lassen sich projektspezifische Phasen mit optionalem Start-
   und Enddatum sowie einer kurzen Beschreibung anlegen. Tickets ohne Phase

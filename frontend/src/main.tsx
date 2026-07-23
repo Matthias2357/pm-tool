@@ -221,6 +221,7 @@ function App() {
   const [previewDocument, setPreviewDocument] = useState<DocumentAttachment | null>(null);
   const [noteEditor, setNoteEditor] = useState<NoteEditorState | null>(null);
   const [phaseDialog, setPhaseDialog] = useState<Phase | "new" | null>(null);
+  const [epicDialog, setEpicDialog] = useState<Epic | "new" | null>(null);
 
   const project = projects.find((item) => item.id === projectId) ?? null;
 
@@ -262,14 +263,6 @@ function App() {
       .finally(() => setLoading(false));
   }, [projectId, loadBoard]);
 
-  const stats = useMemo(() => {
-    const active = tickets.filter((ticket) => ticket.status !== "done").length;
-    const done = tickets.filter((ticket) => ticket.status === "done").length;
-    const critical = tickets.filter((ticket) => isCritical(ticket)).length;
-    const progress = tickets.length ? Math.round((done / tickets.length) * 100) : 0;
-    return { active, done, critical, progress };
-  }, [tickets]);
-
   function isCritical(ticket: Ticket) {
     return (
       ticket.criticality !== "normal" ||
@@ -310,9 +303,9 @@ function App() {
     }
   }
 
-  function openNewTicket(status: TicketStatus = "backlog") {
+  function openNewTicket(status: TicketStatus = "backlog", epic: Epic | null = null) {
     setEditingTicket(null);
-    setTicketDraft({ ...emptyTicket, status });
+    setTicketDraft({ ...emptyTicket, status, epic: epic?.id.toString() ?? "" });
     setTicketDialog(true);
   }
 
@@ -358,16 +351,56 @@ function App() {
     }
   }
 
-  async function moveTicket(ticketId: number, status: TicketStatus) {
+  async function moveTicket(ticketId: number, status: TicketStatus, epic: Epic | null) {
     const original = tickets;
-    setTickets((current) => current.map((ticket) => (ticket.id === ticketId ? { ...ticket, status } : ticket)));
+    setTickets((current) =>
+      current.map((ticket) =>
+        ticket.id === ticketId
+          ? { ...ticket, status, epic: epic?.id ?? null, epic_title: epic?.title ?? null }
+          : ticket,
+      ),
+    );
     try {
       await api<Ticket>(`/tickets/${ticketId}/`, {
         method: "PATCH",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, epic: epic?.id ?? null }),
       });
     } catch (reason) {
       setTickets(original);
+      setError((reason as Error).message);
+    }
+  }
+
+  async function saveEpic(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!projectId || !epicDialog) return;
+    const form = new FormData(event.currentTarget);
+    const existing = epicDialog === "new" ? null : epicDialog;
+    try {
+      await api<Epic>(existing ? `/epics/${existing.id}/` : "/epics/", {
+        method: existing ? "PATCH" : "POST",
+        body: JSON.stringify({
+          project: projectId,
+          title: form.get("title"),
+          description: form.get("description"),
+          progress: existing?.progress ?? 0,
+        }),
+      });
+      await loadBoard(projectId);
+      setEpicDialog(null);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
+
+  async function deleteEpic() {
+    if (!projectId || !epicDialog || epicDialog === "new") return;
+    if (!window.confirm(`Epic „${epicDialog.title}“ wirklich löschen? Die Tickets bleiben ohne Epic erhalten.`)) return;
+    try {
+      await api<void>(`/epics/${epicDialog.id}/`, { method: "DELETE" });
+      await loadBoard(projectId);
+      setEpicDialog(null);
+    } catch (reason) {
       setError((reason as Error).message);
     }
   }
@@ -614,10 +647,9 @@ function App() {
     <div className="app-shell">
       <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
         <div className="brand">
-          <div className="brand-mark">PM</div>
+          <div className="brand-mark">MK</div>
           <div>
-            <strong>PM Tool</strong>
-            <span>Vereinsarbeit</span>
+            <strong>Project Management</strong>
           </div>
           <button className="icon-button mobile-only" onClick={() => setSidebarOpen(false)} aria-label="Menü schließen">
             <X size={20} />
@@ -700,13 +732,16 @@ function App() {
         ) : !project ? (
           <EmptyProject onCreate={() => setProjectDialog(true)} />
         ) : view === "dashboard" ? (
-          <Dashboard project={project} tickets={tickets} stats={stats} onOpenKanban={() => setView("kanban")} />
+          <Dashboard project={project} tickets={tickets} epics={epics} onOpenKanban={() => setView("kanban")} />
         ) : view === "kanban" ? (
           <Kanban
             tickets={tickets}
+            epics={epics}
             onOpen={openTicket}
             onCreate={openNewTicket}
             onMove={moveTicket}
+            onCreateEpic={() => setEpicDialog("new")}
+            onEditEpic={setEpicDialog}
             critical={isCritical}
           />
         ) : view === "timeline" ? (
@@ -1031,6 +1066,40 @@ function App() {
           </form>
         </Modal>
       )}
+
+      {epicDialog && project && (
+        <Modal title={epicDialog === "new" ? "Neues Epic" : "Epic bearbeiten"} onClose={() => setEpicDialog(null)}>
+          <form className="form" onSubmit={saveEpic}>
+            <label>
+              Name des Epics
+              <input
+                name="title"
+                required
+                autoFocus
+                maxLength={200}
+                defaultValue={epicDialog === "new" ? "" : epicDialog.title}
+                placeholder="z. B. Veranstaltungslogistik"
+              />
+            </label>
+            <label>
+              Beschreibung (optional)
+              <textarea
+                name="description"
+                rows={4}
+                defaultValue={epicDialog === "new" ? "" : epicDialog.description}
+                placeholder="Welches übergeordnete Thema bündelt dieses Epic?"
+              />
+            </label>
+            <div className="dialog-actions split-actions">
+              <div>{epicDialog !== "new" && <button type="button" className="button danger" onClick={deleteEpic}>Epic löschen</button>}</div>
+              <div>
+                <button type="button" className="button ghost" onClick={() => setEpicDialog(null)}>Abbrechen</button>
+                <button className="button primary" type="submit">Epic speichern</button>
+              </div>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -1038,12 +1107,12 @@ function App() {
 function Dashboard({
   project,
   tickets,
-  stats,
+  epics,
   onOpenKanban,
 }: {
   project: Project;
   tickets: Ticket[];
-  stats: { active: number; done: number; critical: number; progress: number };
+  epics: Epic[];
   onOpenKanban: () => void;
 }) {
   const recent = tickets.slice(0, 5);
@@ -1053,12 +1122,7 @@ function Dashboard({
         <div><span className="eyebrow">Projektübersicht</span><h1>{project.name}</h1><p>{project.description || "Noch keine Projektbeschreibung hinterlegt."}</p></div>
         <button className="button secondary" onClick={onOpenKanban}>Kanban öffnen</button>
       </div>
-      <section className="stat-grid">
-        <Stat label="Aktive Tickets" value={stats.active} note={`${stats.done} erledigt`} />
-        <Stat label="Fortschritt" value={`${stats.progress} %`} note="nach erledigten Tickets" />
-        <Stat label="Kritische Elemente" value={stats.critical} note={stats.critical ? "Handlungsbedarf" : "Alles im Plan"} warning={stats.critical > 0} />
-        <Stat label="Projektphasen" value={project.phases.length} note="frei in der Timeline definiert" />
-      </section>
+      <EpicOverview epics={epics} tickets={tickets} />
       <PhaseOverviewTimeline phases={project.phases} />
       <section className="content-card">
         <div className="card-heading"><div><h2>Aktuelle Tickets</h2><p>Die zuletzt relevanten Aufgaben im Projekt.</p></div></div>
@@ -1071,6 +1135,57 @@ function Dashboard({
         ) : <div className="empty-inline">Noch keine Tickets vorhanden. Öffne das Kanban-Board und lege das erste Ticket an.</div>}
       </section>
     </div>
+  );
+}
+
+function EpicOverview({ epics, tickets }: { epics: Epic[]; tickets: Ticket[] }) {
+  const withoutEpic = tickets.filter((ticket) => ticket.epic === null);
+
+  function epicStatus(epicTickets: Ticket[]) {
+    if (!epicTickets.length) return { key: "empty", label: "Noch ohne Tickets", progress: 0 };
+    const done = epicTickets.filter((ticket) => ticket.status === "done").length;
+    const progress = Math.round((done / epicTickets.length) * 100);
+    if (done === epicTickets.length) return { key: "done", label: "Abgeschlossen", progress };
+    if (epicTickets.some((ticket) => ["in_progress", "review"].includes(ticket.status))) {
+      return { key: "active", label: "In Arbeit", progress };
+    }
+    return { key: "planned", label: "Geplant", progress };
+  }
+
+  return (
+    <section className="epic-overview-card">
+      <header>
+        <div><h2>Epics</h2><p>Thematische Bereiche und ihr aktueller Bearbeitungsstand.</p></div>
+        <span>{epics.length} {epics.length === 1 ? "Epic" : "Epics"}</span>
+      </header>
+      {!epics.length ? (
+        <div className="empty-inline">Noch keine Epics vorhanden. Lege das erste Epic im Kanban-Board an.</div>
+      ) : (
+        <div className="epic-overview-grid">
+          {epics.map((epic) => {
+            const epicTickets = tickets.filter((ticket) => ticket.epic === epic.id);
+            const status = epicStatus(epicTickets);
+            return (
+              <article className="epic-overview-item" key={epic.id}>
+                <div className="epic-overview-title">
+                  <span className="epic-heading-icon"><GitBranch size={17} /></span>
+                  <div><strong>{epic.title}</strong><small>{epicTickets.length} {epicTickets.length === 1 ? "Ticket" : "Tickets"}</small></div>
+                  <span className={`epic-status ${status.key}`}>{status.label}</span>
+                </div>
+                {epic.description && <p>{epic.description}</p>}
+                <div className="epic-overview-progress">
+                  <div><span style={{ width: `${status.progress}%` }} /></div>
+                  <strong>{status.progress} %</strong>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+      {withoutEpic.length > 0 && (
+        <div className="epic-unassigned-note"><KanbanSquare size={16} /> {withoutEpic.length} {withoutEpic.length === 1 ? "Ticket ist" : "Tickets sind"} noch keinem Epic zugeordnet.</div>
+      )}
+    </section>
   );
 }
 
@@ -1121,10 +1236,6 @@ function PhaseOverviewTimeline({ phases }: { phases: Phase[] }) {
       )}
     </section>
   );
-}
-
-function Stat({ label, value, note, warning = false }: { label: string; value: string | number; note: string; warning?: boolean }) {
-  return <div className={`stat-card ${warning ? "warning" : ""}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>;
 }
 
 function Timeline({
@@ -1259,21 +1370,84 @@ function formatDateRange(start: string | null, end: string | null) {
 
 function Kanban({
   tickets,
+  epics,
+  onOpen,
+  onCreate,
+  onMove,
+  onCreateEpic,
+  onEditEpic,
+  critical,
+}: {
+  tickets: Ticket[];
+  epics: Epic[];
+  onOpen: (ticket: Ticket) => void;
+  onCreate: (status: TicketStatus, epic: Epic | null) => void;
+  onMove: (id: number, status: TicketStatus, epic: Epic | null) => void;
+  onCreateEpic: () => void;
+  onEditEpic: (epic: Epic) => void;
+  critical: (ticket: Ticket) => boolean;
+}) {
+  const withoutEpic = tickets.filter((ticket) => ticket.epic === null);
+  return (
+    <div className="page kanban-page">
+      <div className="page-heading compact">
+        <div><span className="eyebrow">Arbeitsbereich</span><h1>Kanban-Board</h1><p>Epics gliedern das Board thematisch. Ziehe Karten zwischen Status und Epic-Bereichen.</p></div>
+        <button className="button primary" onClick={onCreateEpic}><Plus size={17} /> Epic erstellen</button>
+      </div>
+      <div className="epic-boards">
+        {epics.map((epic) => {
+          const epicTickets = tickets.filter((ticket) => ticket.epic === epic.id);
+          const done = epicTickets.filter((ticket) => ticket.status === "done").length;
+          const progress = epicTickets.length ? Math.round((done / epicTickets.length) * 100) : 0;
+          return (
+            <section className="epic-board-section" key={epic.id}>
+              <header className="epic-board-heading">
+                <div>
+                  <span className="epic-heading-icon"><GitBranch size={18} /></span>
+                  <div><span className="eyebrow">Epic</span><h2>{epic.title}</h2>{epic.description && <p>{epic.description}</p>}</div>
+                </div>
+                <div className="epic-heading-meta">
+                  <span>{epicTickets.length} Tickets</span>
+                  <span>{progress} % erledigt</span>
+                  <button className="icon-button" onClick={() => onEditEpic(epic)} aria-label={`${epic.title} bearbeiten`}><Pencil size={16} /></button>
+                </div>
+              </header>
+              <KanbanGroup epic={epic} tickets={epicTickets} onOpen={onOpen} onCreate={onCreate} onMove={onMove} critical={critical} />
+            </section>
+          );
+        })}
+        <section className="epic-board-section unassigned-epic">
+          <header className="epic-board-heading">
+            <div>
+              <span className="epic-heading-icon neutral"><KanbanSquare size={18} /></span>
+              <div><span className="eyebrow">Sammelbereich</span><h2>Tickets ohne Epic</h2><p>Noch keinem übergeordneten Thema zugeordnet.</p></div>
+            </div>
+            <div className="epic-heading-meta"><span>{withoutEpic.length} Tickets</span></div>
+          </header>
+          <KanbanGroup epic={null} tickets={withoutEpic} onOpen={onOpen} onCreate={onCreate} onMove={onMove} critical={critical} />
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function KanbanGroup({
+  epic,
+  tickets,
   onOpen,
   onCreate,
   onMove,
   critical,
 }: {
+  epic: Epic | null;
   tickets: Ticket[];
   onOpen: (ticket: Ticket) => void;
-  onCreate: (status: TicketStatus) => void;
-  onMove: (id: number, status: TicketStatus) => void;
+  onCreate: (status: TicketStatus, epic: Epic | null) => void;
+  onMove: (id: number, status: TicketStatus, epic: Epic | null) => void;
   critical: (ticket: Ticket) => boolean;
 }) {
   return (
-    <div className="page kanban-page">
-      <div className="page-heading compact"><div><span className="eyebrow">Arbeitsbereich</span><h1>Kanban-Board</h1><p>Ziehe Karten in eine andere Spalte oder öffne sie zum Bearbeiten.</p></div></div>
-      <div className="board">
+    <div className="board">
         {columns.map((column) => {
           const items = tickets.filter((ticket) => ticket.status === column.status);
           return (
@@ -1283,12 +1457,12 @@ function Kanban({
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {
                 const id = Number(event.dataTransfer.getData("text/ticket-id"));
-                if (id) onMove(id, column.status);
+                if (id) onMove(id, column.status, epic);
               }}
             >
               <header style={{ borderTopColor: column.accent }}>
                 <div><h2>{column.label}</h2><span>{items.length}</span></div>
-                <button onClick={() => onCreate(column.status)} aria-label={`Ticket in ${column.label} anlegen`}><Plus size={18} /></button>
+                <button onClick={() => onCreate(column.status, epic)} aria-label={`Ticket in ${column.label} anlegen`}><Plus size={18} /></button>
               </header>
               <div className="column-body">
                 {items.map((ticket) => (
@@ -1300,7 +1474,7 @@ function Kanban({
                     onClick={() => onOpen(ticket)}
                   >
                     <div className="ticket-card-top">
-                      {ticket.epic_title && <span className="epic-label">{ticket.epic_title}</span>}
+                      <span className="epic-label">{epic?.title ?? "Ohne Epic"}</span>
                       {critical(ticket) && <AlertTriangle size={16} />}
                     </div>
                     <strong>{ticket.title}</strong>
@@ -1318,7 +1492,6 @@ function Kanban({
           );
         })}
       </div>
-    </div>
   );
 }
 
