@@ -70,9 +70,9 @@ docker compose exec backend python manage.py createsuperuser
 ```
 
 Danach kann unter `http://localhost:5173` direkt ein eigenes Projekt angelegt
-werden. Die Phasen Startup, Grobplanung, Detailplanung und Umsetzung entstehen
-automatisch. Optional erzeugt der folgende Befehl ein zusätzliches
-Beispielprojekt:
+werden. Die benötigten Projektphasen werden frei in der Timeline erstellt.
+Optional erzeugt der folgende Befehl ein zusätzliches Beispielprojekt mit den
+Phasen Startup, Grobplanung, Detailplanung und Umsetzung:
 
 ```bash
 docker compose exec backend python manage.py create_example_project
@@ -81,11 +81,19 @@ docker compose exec backend python manage.py create_example_project
 ## Bedienung
 
 - Über die Projektauswahl oben wird das aktive Projekt gewechselt.
-- `+ Projekt` legt ein Projekt mit den vier Standardphasen an.
+- `+ Projekt` legt ein zunächst phasenloses Projekt an.
 - `+ Ticket` erstellt eine neue Kanban-Karte.
 - Im Kanban-Board lassen sich Karten per Drag-and-drop zwischen den Spalten
   verschieben.
 - Ein Klick auf eine Karte öffnet alle Details zum Bearbeiten oder Löschen.
+- In der Timeline lassen sich projektspezifische Phasen mit optionalem Start-
+  und Enddatum sowie einer kurzen Beschreibung anlegen. Tickets ohne Phase
+  stehen oben in einem Sammelfeld und können per Drag-and-drop in eine Phase
+  oder zurück verschoben werden.
+- Die Übersicht zeigt diese Phasen mit Zeitraum und Beschreibung an einem
+  vertikalen Zeitstrahl.
+- Die Phasenzuordnung ist dieselbe wie im Kanban und steht dort unmittelbar im
+  Ticketformular zur Verfügung.
 - Unter `Methodik` verwendet die individuelle Eisenhower-Matrix:
   Alpha (wichtig/dringend), Beta (nicht wichtig/dringend), Gamma
   (wichtig/nicht dringend) und Delta (nicht wichtig/nicht dringend).

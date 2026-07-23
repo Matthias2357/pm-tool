@@ -5,7 +5,7 @@ from .models import Project
 
 
 class ProjectApiTests(APITestCase):
-    def test_creating_project_adds_default_phases(self):
+    def test_creating_project_starts_without_fixed_phases(self):
         response = self.client.post(
             "/api/projects/",
             {"name": "Vereinsfest", "description": "Planung"},
@@ -14,10 +14,7 @@ class ProjectApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         project = Project.objects.get(pk=response.data["id"])
-        self.assertEqual(
-            list(project.phases.values_list("name", flat=True)),
-            ["Startup Phase", "Grobplanung", "Detailplanung", "Umsetzung"],
-        )
+        self.assertEqual(project.phases.count(), 0)
 
     def test_projects_can_be_filtered_by_archive_status(self):
         Project.objects.create(name="Aktiv")
@@ -42,4 +39,25 @@ class ProjectApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         project.refresh_from_db()
         self.assertEqual(project.name, "Neuer Name")
+        self.assertEqual(project.phases.count(), 1)
+
+    def test_custom_phase_can_be_created_for_project(self):
+        project = Project.objects.create(name="Individuelles Projekt")
+
+        response = self.client.post(
+            "/api/phases/",
+            {
+                "project": project.id,
+                "name": "Genehmigungsplanung",
+                "description": "Abstimmung und Einreichung der Unterlagen",
+                "order": 0,
+                "starts_on": "2026-08-01",
+                "ends_on": "2026-09-15",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["name"], "Genehmigungsplanung")
+        self.assertEqual(response.data["description"], "Abstimmung und Einreichung der Unterlagen")
         self.assertEqual(project.phases.count(), 1)

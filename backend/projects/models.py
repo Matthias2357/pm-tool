@@ -15,6 +15,7 @@ class Project(TimeStampedModel):
 class Phase(TimeStampedModel):
     project = models.ForeignKey(Project, related_name="phases", on_delete=models.CASCADE)
     name = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
     order = models.PositiveIntegerField(default=0)
     starts_on = models.DateField(null=True, blank=True)
     ends_on = models.DateField(null=True, blank=True)

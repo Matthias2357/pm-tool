@@ -2,8 +2,6 @@ from rest_framework import serializers
 
 from .models import Phase, Project
 
-DEFAULT_PHASES = ("Startup Phase", "Grobplanung", "Detailplanung", "Umsetzung")
-
 
 class PhaseSerializer(serializers.ModelSerializer):
     class Meta:
@@ -17,11 +15,3 @@ class ProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = "__all__"
-
-    def create(self, validated_data):
-        project = super().create(validated_data)
-        Phase.objects.bulk_create(
-            Phase(project=project, name=name, order=order)
-            for order, name in enumerate(DEFAULT_PHASES)
-        )
-        return project

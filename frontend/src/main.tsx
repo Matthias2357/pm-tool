@@ -53,7 +53,10 @@ interface Phase {
   id: number;
   project: number;
   name: string;
+  description: string;
   order: number;
+  starts_on: string | null;
+  ends_on: string | null;
 }
 
 interface Epic {
@@ -92,6 +95,7 @@ interface TicketDraft {
   phase: string;
   epic: string;
   due_on: string;
+  starts_on: string;
   importance: number;
   urgency: number;
   progress: number;
@@ -152,6 +156,7 @@ const emptyTicket: TicketDraft = {
   phase: "",
   epic: "",
   due_on: "",
+  starts_on: "",
   importance: -1,
   urgency: -1,
   progress: 0,
@@ -215,6 +220,7 @@ function App() {
   const [uploadEntry, setUploadEntry] = useState<DocumentEntry | null>(null);
   const [previewDocument, setPreviewDocument] = useState<DocumentAttachment | null>(null);
   const [noteEditor, setNoteEditor] = useState<NoteEditorState | null>(null);
+  const [phaseDialog, setPhaseDialog] = useState<Phase | "new" | null>(null);
 
   const project = projects.find((item) => item.id === projectId) ?? null;
 
@@ -319,6 +325,7 @@ function App() {
       phase: ticket.phase?.toString() ?? "",
       epic: ticket.epic?.toString() ?? "",
       due_on: ticket.due_on ?? "",
+      starts_on: ticket.starts_on ?? "",
       importance: ticket.importance,
       urgency: ticket.urgency,
       progress: ticket.progress,
@@ -336,6 +343,7 @@ function App() {
       phase: ticketDraft.phase ? Number(ticketDraft.phase) : null,
       epic: ticketDraft.epic ? Number(ticketDraft.epic) : null,
       due_on: ticketDraft.due_on || null,
+      starts_on: ticketDraft.starts_on || null,
     };
     setError("");
     try {
@@ -386,6 +394,50 @@ function App() {
       });
     } catch (reason) {
       setTickets(original);
+      setError((reason as Error).message);
+    }
+  }
+
+  async function assignTicketPhase(ticketId: number, phase: Phase | null) {
+    const original = tickets;
+    setTickets((current) =>
+      current.map((ticket) =>
+        ticket.id === ticketId
+          ? { ...ticket, phase: phase?.id ?? null, phase_name: phase?.name ?? null }
+          : ticket,
+      ),
+    );
+    try {
+      await api<Ticket>(`/tickets/${ticketId}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ phase: phase?.id ?? null }),
+      });
+    } catch (reason) {
+      setTickets(original);
+      setError((reason as Error).message);
+    }
+  }
+
+  async function savePhase(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!projectId || !phaseDialog) return;
+    const form = new FormData(event.currentTarget);
+    const existing = phaseDialog === "new" ? null : phaseDialog;
+    try {
+      await api<Phase>(existing ? `/phases/${existing.id}/` : "/phases/", {
+        method: existing ? "PATCH" : "POST",
+        body: JSON.stringify({
+          project: projectId,
+          name: form.get("name"),
+          description: form.get("description"),
+          order: existing?.order ?? project?.phases.length ?? 0,
+          starts_on: form.get("starts_on") || null,
+          ends_on: form.get("ends_on") || null,
+        }),
+      });
+      await loadProjects();
+      setPhaseDialog(null);
+    } catch (reason) {
       setError((reason as Error).message);
     }
   }
@@ -657,6 +709,15 @@ function App() {
             onMove={moveTicket}
             critical={isCritical}
           />
+        ) : view === "timeline" ? (
+          <Timeline
+            project={project}
+            tickets={tickets}
+            onOpenTicket={openTicket}
+            onAssignPhase={assignTicketPhase}
+            onCreatePhase={() => setPhaseDialog("new")}
+            onEditPhase={setPhaseDialog}
+          />
         ) : view === "methodology" ? (
           <Methodology
             tickets={tickets}
@@ -691,7 +752,7 @@ function App() {
               Beschreibung
               <textarea name="description" rows={4} placeholder="Ziel und Rahmen des Projekts" />
             </label>
-            <p className="form-hint">Die vier Phasen Startup, Grobplanung, Detailplanung und Umsetzung werden automatisch angelegt.</p>
+            <p className="form-hint">Projektphasen legst du anschließend passend zu deinem Ablauf in der Timeline an.</p>
             <div className="dialog-actions">
               <button type="button" className="button ghost" onClick={() => setProjectDialog(false)}>Abbrechen</button>
               <button className="button primary" type="submit">Projekt anlegen</button>
@@ -765,6 +826,10 @@ function App() {
             <label>
               Fällig am
               <input type="date" value={ticketDraft.due_on} onChange={(event) => setTicketDraft({ ...ticketDraft, due_on: event.target.value })} />
+            </label>
+            <label>
+              Startdatum
+              <input type="date" value={ticketDraft.starts_on} onChange={(event) => setTicketDraft({ ...ticketDraft, starts_on: event.target.value })} />
             </label>
             <label>
               Wichtigkeit
@@ -913,6 +978,59 @@ function App() {
           onSave={saveEditableNote}
         />
       )}
+
+      {phaseDialog && project && (
+        <Modal
+          title={phaseDialog === "new" ? "Neue Phase" : "Phase bearbeiten"}
+          onClose={() => setPhaseDialog(null)}
+          overflowVisible
+        >
+          <form className="form" onSubmit={savePhase}>
+            <label>
+              Name der Phase
+              <input
+                name="name"
+                required
+                autoFocus
+                maxLength={120}
+                defaultValue={phaseDialog === "new" ? "" : phaseDialog.name}
+                placeholder="z. B. Genehmigungsplanung"
+              />
+            </label>
+            <label>
+              Kurze Beschreibung (optional)
+              <textarea
+                name="description"
+                rows={3}
+                defaultValue={phaseDialog === "new" ? "" : phaseDialog.description}
+                placeholder="Ziel, Inhalt und erwartetes Ergebnis dieser Phase"
+              />
+            </label>
+            <div className="phase-date-fields">
+              <label>
+                Startdatum (optional)
+                <GermanDatePicker
+                  name="starts_on"
+                  defaultValue={phaseDialog === "new" ? "" : phaseDialog.starts_on ?? ""}
+                  optional
+                />
+              </label>
+              <label>
+                Enddatum (optional)
+                <GermanDatePicker
+                  name="ends_on"
+                  defaultValue={phaseDialog === "new" ? "" : phaseDialog.ends_on ?? ""}
+                  optional
+                />
+              </label>
+            </div>
+            <div className="dialog-actions">
+              <button type="button" className="button ghost" onClick={() => setPhaseDialog(null)}>Abbrechen</button>
+              <button className="button primary" type="submit">Phase speichern</button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -939,8 +1057,9 @@ function Dashboard({
         <Stat label="Aktive Tickets" value={stats.active} note={`${stats.done} erledigt`} />
         <Stat label="Fortschritt" value={`${stats.progress} %`} note="nach erledigten Tickets" />
         <Stat label="Kritische Elemente" value={stats.critical} note={stats.critical ? "Handlungsbedarf" : "Alles im Plan"} warning={stats.critical > 0} />
-        <Stat label="Projektphasen" value={project.phases.length} note="von Startup bis Umsetzung" />
+        <Stat label="Projektphasen" value={project.phases.length} note="frei in der Timeline definiert" />
       </section>
+      <PhaseOverviewTimeline phases={project.phases} />
       <section className="content-card">
         <div className="card-heading"><div><h2>Aktuelle Tickets</h2><p>Die zuletzt relevanten Aufgaben im Projekt.</p></div></div>
         {recent.length ? (
@@ -955,8 +1074,187 @@ function Dashboard({
   );
 }
 
+function PhaseOverviewTimeline({ phases }: { phases: Phase[] }) {
+  const ordered = [...phases].sort((a, b) => a.order - b.order);
+  const today = new Date().toISOString().slice(0, 10);
+
+  function phaseState(phase: Phase) {
+    if (phase.starts_on && phase.starts_on > today) return "future";
+    if (phase.ends_on && phase.ends_on < today) return "past";
+    if (phase.starts_on || phase.ends_on) return "current";
+    return "undated";
+  }
+
+  return (
+    <section className="overview-timeline-card">
+      <header>
+        <div><h2>Phasen-Zeitstrahl</h2><p>Chronologischer Projektablauf aus der Timeline.</p></div>
+        <span>{ordered.length} Phasen</span>
+      </header>
+      {!ordered.length ? (
+        <div className="overview-timeline-empty"><CalendarDays size={18} /> Noch keine Phasen angelegt.</div>
+      ) : (
+        <div className="overview-timeline-scroll">
+          <div className="overview-timeline-track">
+            {ordered.map((phase, index) => {
+              const state = phaseState(phase);
+              return (
+                <div className={`overview-phase ${state}`} key={phase.id}>
+                  <div className="overview-phase-marker">
+                    <span>{index + 1}</span>
+                    {index < ordered.length - 1 && <i />}
+                  </div>
+                  <div className="overview-phase-content">
+                    <strong>{phase.name}</strong>
+                    <span>{formatDateRange(phase.starts_on, phase.ends_on)}</span>
+                    {phase.description && <p>{phase.description}</p>}
+                    {state === "current" && <small>Aktuelle Phase</small>}
+                    {state === "past" && <small>Abgeschlossen</small>}
+                    {state === "future" && <small>Geplant</small>}
+                    {state === "undated" && <small>Ohne Zeitraum</small>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Stat({ label, value, note, warning = false }: { label: string; value: string | number; note: string; warning?: boolean }) {
   return <div className={`stat-card ${warning ? "warning" : ""}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>;
+}
+
+function Timeline({
+  project,
+  tickets,
+  onOpenTicket,
+  onAssignPhase,
+  onCreatePhase,
+  onEditPhase,
+}: {
+  project: Project;
+  tickets: Ticket[];
+  onOpenTicket: (ticket: Ticket) => void;
+  onAssignPhase: (ticketId: number, phase: Phase | null) => void;
+  onCreatePhase: () => void;
+  onEditPhase: (phase: Phase) => void;
+}) {
+  const withoutPhase = tickets.filter((ticket) => ticket.phase === null);
+  const phases = [...project.phases].sort((a, b) => a.order - b.order);
+
+  function droppedTicketId(event: React.DragEvent) {
+    return Number(event.dataTransfer.getData("text/ticket-id"));
+  }
+
+  return (
+    <div className="page timeline-page">
+      <div className="page-heading">
+        <div>
+          <span className="eyebrow">Chronologische Planung</span>
+          <h1>Timeline</h1>
+          <p>Erstelle eigene Projektphasen und ordne Tickets per Drag-and-drop ein.</p>
+        </div>
+        <button className="button primary" onClick={onCreatePhase}><Plus size={17} /> Phase erstellen</button>
+      </div>
+
+      <section
+        className="unphased-section"
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          const id = droppedTicketId(event);
+          if (id) onAssignPhase(id, null);
+        }}
+      >
+        <header>
+          <div><span className="unphased-icon"><ListChecks size={18} /></span><div><h2>Tickets ohne Phase</h2><p>Ziehe diese Tickets in eine der Projektphasen.</p></div></div>
+          <b>{withoutPhase.length}</b>
+        </header>
+        <div className="unphased-tickets">
+          {withoutPhase.map((ticket) => (
+            <TimelineTicketRow ticket={ticket} key={ticket.id} onOpen={onOpenTicket} compact />
+          ))}
+          {!withoutPhase.length && <div className="timeline-drop-empty"><CheckCircle2 size={17} /> Alle Tickets sind einer Phase zugeordnet.</div>}
+        </div>
+      </section>
+
+      <div className="timeline-phases">
+        {!phases.length && (
+          <div className="timeline-no-phases">
+            <CalendarDays size={30} />
+            <h2>Noch keine Projektphasen</h2>
+            <p>Lege deine erste Phase frei nach dem Ablauf dieses Projekts an.</p>
+            <button className="button primary" onClick={onCreatePhase}><Plus size={17} /> Erste Phase erstellen</button>
+          </div>
+        )}
+        {phases.map((phase, index) => {
+          const phaseTickets = tickets.filter((ticket) => ticket.phase === phase.id);
+          return (
+            <section
+              className="timeline-phase"
+              key={phase.id}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                const id = droppedTicketId(event);
+                if (id) onAssignPhase(id, phase);
+              }}
+            >
+              <div className="timeline-rail">
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                {index < phases.length - 1 && <i />}
+              </div>
+              <div className="timeline-phase-card">
+                <header>
+                  <div>
+                    <span className="phase-label">Phase {index + 1}</span>
+                    <h2>{phase.name}</h2>
+                    {phase.description && <p className="phase-description">{phase.description}</p>}
+                    <div className="phase-dates">
+                      <span><CalendarDays size={13} /> {formatDateRange(phase.starts_on, phase.ends_on)}</span>
+                      <span>{phaseTickets.length} Tickets</span>
+                    </div>
+                  </div>
+                  <button className="icon-button" onClick={() => onEditPhase(phase)} aria-label={`${phase.name} bearbeiten`}><Pencil size={17} /></button>
+                </header>
+                <div className="phase-ticket-list">
+                  {phaseTickets.map((ticket) => <TimelineTicketRow ticket={ticket} key={ticket.id} onOpen={onOpenTicket} />)}
+                  {!phaseTickets.length && <div className="timeline-drop-empty">Ticket in diese Phase ziehen</div>}
+                </div>
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TimelineTicketRow({ ticket, onOpen, compact = false }: { ticket: Ticket; onOpen: (ticket: Ticket) => void; compact?: boolean }) {
+  return (
+    <button
+      className={`timeline-ticket ${compact ? "compact" : ""}`}
+      draggable
+      onDragStart={(event) => event.dataTransfer.setData("text/ticket-id", String(ticket.id))}
+      onClick={() => onOpen(ticket)}
+    >
+      <span className={`status-dot ${ticket.status}`} />
+      <span className="timeline-ticket-title"><strong>{ticket.title}</strong>{ticket.epic_title && <small>{ticket.epic_title}</small>}</span>
+      <span className="timeline-ticket-date start-date"><small>Start</small><strong>{formatGermanDate(ticket.starts_on)}</strong></span>
+      <span className="timeline-ticket-date"><small>Ende</small><strong>{formatGermanDate(ticket.due_on)}</strong></span>
+      <span className="timeline-ticket-progress"><i><b style={{ width: `${ticket.progress}%` }} /></i><small>{ticket.progress} %</small></span>
+    </button>
+  );
+}
+
+function formatGermanDate(value: string | null) {
+  return value ? new Date(`${value}T00:00:00`).toLocaleDateString("de-DE") : "–";
+}
+
+function formatDateRange(start: string | null, end: string | null) {
+  if (!start && !end) return "Zeitraum noch offen";
+  return `${formatGermanDate(start)} – ${formatGermanDate(end)}`;
 }
 
 function Kanban({
@@ -1313,10 +1611,19 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function GermanDatePicker({ name }: { name: string }) {
+function GermanDatePicker({
+  name,
+  defaultValue,
+  optional = false,
+}: {
+  name: string;
+  defaultValue?: string;
+  optional?: boolean;
+}) {
   const today = new Date();
-  const [value, setValue] = useState(() => toLocalIsoDate(today));
-  const [visibleMonth, setVisibleMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
+  const [value, setValue] = useState(() => defaultValue ?? (optional ? "" : toLocalIsoDate(today)));
+  const initialDate = defaultValue ? new Date(`${defaultValue}T00:00:00`) : today;
+  const [visibleMonth, setVisibleMonth] = useState(() => new Date(initialDate.getFullYear(), initialDate.getMonth(), 1));
   const [open, setOpen] = useState(false);
   const year = visibleMonth.getFullYear();
   const month = visibleMonth.getMonth();
@@ -1329,10 +1636,10 @@ function GermanDatePicker({ name }: { name: string }) {
 
   return (
     <div className="german-date-picker">
-      <input name={name} type="hidden" value={value} />
+      <input name={name} type="hidden" value={value} readOnly />
       <button type="button" className="date-display" onClick={() => setOpen((current) => !current)}>
         <CalendarDays size={17} />
-        <span>{new Date(`${value}T00:00:00`).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}</span>
+        <span>{value ? new Date(`${value}T00:00:00`).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }) : "Datum wählen"}</span>
         <small>TT.MM.JJJJ</small>
       </button>
       {open && (
@@ -1374,6 +1681,18 @@ function GermanDatePicker({ name }: { name: string }) {
           >
             Heute
           </button>
+          {optional && value && (
+            <button
+              type="button"
+              className="calendar-clear"
+              onClick={() => {
+                setValue("");
+                setOpen(false);
+              }}
+            >
+              Datum entfernen
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1497,7 +1816,7 @@ function DocumentPreview({ document, onClose }: { document: DocumentAttachment; 
 }
 
 function EmptyProject({ onCreate }: { onCreate: () => void }) {
-  return <div className="center-state empty-project"><div className="empty-icon"><KanbanSquare size={32} /></div><h1>Dein erstes Projekt</h1><p>Lege ein Projekt an. Die vorgesehenen vier Projektphasen werden automatisch erstellt.</p><button className="button primary" onClick={onCreate}><Plus size={17} /> Projekt anlegen</button></div>;
+  return <div className="center-state empty-project"><div className="empty-icon"><KanbanSquare size={32} /></div><h1>Dein erstes Projekt</h1><p>Lege ein Projekt an und definiere anschließend die passenden Phasen in der Timeline.</p><button className="button primary" onClick={onCreate}><Plus size={17} /> Projekt anlegen</button></div>;
 }
 
 function ComingSoon({ view, onKanban }: { view: View; onKanban: () => void }) {
@@ -1506,10 +1825,22 @@ function ComingSoon({ view, onKanban }: { view: View; onKanban: () => void }) {
   return <div className="center-state coming-soon"><div className="empty-icon"><Icon size={30} /></div><span className="eyebrow">Nächste Ausbaustufe</span><h1>{item.label}</h1><p>Dieser Bereich ist in der Navigation vorbereitet. Zuerst steht dir das vollständig gespeicherte Kanban-Board zur Verfügung.</p><button className="button primary" onClick={onKanban}>Zum Kanban-Board</button></div>;
 }
 
-function Modal({ title, onClose, wide = false, children }: { title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }) {
+function Modal({
+  title,
+  onClose,
+  wide = false,
+  overflowVisible = false,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  wide?: boolean;
+  overflowVisible?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className={`modal ${wide ? "modal-wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+      <section className={`modal ${wide ? "modal-wide" : ""} ${overflowVisible ? "modal-overflow-visible" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
         <header><h2>{title}</h2><button className="icon-button" onClick={onClose} aria-label="Dialog schließen"><X size={20} /></button></header>
         {children}
       </section>

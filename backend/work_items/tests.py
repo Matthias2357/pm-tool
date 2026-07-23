@@ -54,6 +54,19 @@ class TicketApiTests(APITestCase):
         ticket.refresh_from_db()
         self.assertEqual(ticket.status, "in_progress")
 
+    def test_ticket_phase_can_be_updated_for_timeline_drag_and_drop(self):
+        ticket = Ticket.objects.create(project=self.project, title="Einzuordnen")
+
+        response = self.client.patch(
+            f"/api/tickets/{ticket.id}/",
+            {"phase": self.phase.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.phase_id, self.phase.id)
+
     def test_personal_methodology_priority_is_returned(self):
         ticket = Ticket.objects.create(
             project=self.project,
