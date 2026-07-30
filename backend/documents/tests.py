@@ -91,6 +91,32 @@ class DocumentApiTests(APITestCase):
         self.assertEqual(self.block.name, "Festleitersitzungen")
         self.assertEqual(self.block.entries.count(), 1)
 
+    def test_document_file_can_be_replaced_without_losing_new_file_reference(self):
+        document = Document.objects.create(
+            project=self.project,
+            entry=self.entry,
+            title="Planungsnotiz",
+            file=SimpleUploadedFile("alte-notiz.pdf", b"old pdf"),
+        )
+        old_name = document.file.name
+        storage = document.file.storage
+
+        response = self.client.patch(
+            f"/api/documents/{document.id}/",
+            {
+                "title": "Aktualisierte Planungsnotiz",
+                "file": SimpleUploadedFile("neue-notiz.pdf", b"new pdf", content_type="application/pdf"),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["file_name"], "neue-notiz.pdf")
+        document.refresh_from_db()
+        self.assertTrue(document.file.name.endswith("neue-notiz.pdf"))
+        self.assertTrue(storage.exists(document.file.name))
+        self.assertFalse(storage.exists(old_name))
+
     def test_editable_note_keeps_source_and_generated_document_link(self):
         document = Document.objects.create(
             project=self.project,

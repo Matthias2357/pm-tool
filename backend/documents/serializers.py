@@ -35,12 +35,14 @@ class DocumentSerializer(serializers.ModelSerializer):
         return value
 
     def get_file_name(self, obj):
-        return Path(obj.file.name).name
+        return Path(obj.file.name).name if obj.file and obj.file.name else ""
 
     def get_file_url(self, obj):
-        return obj.file.url
+        return obj.file.url if obj.file and obj.file.name else ""
 
     def get_file_kind(self, obj):
+        if not obj.file or not obj.file.name:
+            return "other"
         extension = Path(obj.file.name).suffix.lower()
         if extension in IMAGE_EXTENSIONS:
             return "image"
@@ -51,9 +53,11 @@ class DocumentSerializer(serializers.ModelSerializer):
         return "other"
 
     def get_file_size(self, obj):
+        if not obj.file or not obj.file.name:
+            return 0
         try:
             return obj.file.size
-        except OSError:
+        except (OSError, ValueError):
             return 0
 
     def get_editable_note_id(self, obj):
@@ -63,10 +67,11 @@ class DocumentSerializer(serializers.ModelSerializer):
             return None
 
     def update(self, instance, validated_data):
-        old_file = instance.file if "file" in validated_data else None
+        old_name = instance.file.name if "file" in validated_data and instance.file else ""
+        storage = instance.file.storage if old_name else None
         updated = super().update(instance, validated_data)
-        if old_file and old_file.name != updated.file.name:
-            old_file.delete(save=False)
+        if storage and old_name != updated.file.name:
+            storage.delete(old_name)
         return updated
 
 
