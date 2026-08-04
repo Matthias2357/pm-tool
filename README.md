@@ -48,6 +48,15 @@ Standardwert `../pm-tool-contents` entspricht bei einem Repository unter
 docker compose up --build
 ```
 
+Alternativ stehen dafür Skripte bereit, die auch aus einem anderen
+Arbeitsverzeichnis aufgerufen werden können:
+
+```bash
+./scripts/start.sh
+./scripts/stop.sh
+./scripts/restart.sh
+```
+
 4. App oeffnen:
 
 ```text

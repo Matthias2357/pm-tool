@@ -760,16 +760,24 @@ function App() {
         },
       );
       const fileName = `${title.trim().replace(/[^a-zA-Z0-9äöüÄÖÜß_-]+/g, "_") || "Notiz"}.pdf`;
-      const pdfBlob = await html2pdf()
-        .set({
-          margin: [14, 14, 16, 14],
-          filename: fileName,
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: { scale: 2, backgroundColor: "#ffffff" },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-        })
-        .from(preview)
-        .outputPdf("blob");
+      preview.classList.add("note-pdf-export");
+      let pdfBlob: Blob;
+      try {
+        pdfBlob = await html2pdf()
+          .set({
+            // Der Satzspiegel wird vom PDF-Generator auf jeder Seite ergänzt.
+            // Die Vorschau enthält während des Exports deshalb keine fest eingebrannten Seitenränder.
+            margin: [20, 18, 20, 18],
+            filename: fileName,
+            image: { type: "jpeg", quality: 0.98 },
+            html2canvas: { scale: 2, backgroundColor: "#ffffff" },
+            jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+          })
+          .from(preview)
+          .outputPdf("blob");
+      } finally {
+        preview.classList.remove("note-pdf-export");
+      }
       const pdfFile = new File([pdfBlob], fileName, { type: "application/pdf" });
       const upload = new FormData();
       upload.append("title", title);

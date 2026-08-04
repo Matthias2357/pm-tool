@@ -38,7 +38,11 @@ class DocumentSerializer(serializers.ModelSerializer):
         return Path(obj.file.name).name if obj.file and obj.file.name else ""
 
     def get_file_url(self, obj):
-        return obj.file.url if obj.file and obj.file.name else ""
+        if not obj.file or not obj.file.name:
+            return ""
+        version = int(obj.updated_at.timestamp() * 1_000_000)
+        separator = "&" if "?" in obj.file.url else "?"
+        return f"{obj.file.url}{separator}v={version}"
 
     def get_file_kind(self, obj):
         if not obj.file or not obj.file.name:

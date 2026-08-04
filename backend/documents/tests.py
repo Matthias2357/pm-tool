@@ -100,6 +100,8 @@ class DocumentApiTests(APITestCase):
         )
         old_name = document.file.name
         storage = document.file.storage
+        old_response = self.client.get(f"/api/documents/{document.id}/")
+        old_file_url = old_response.data["file_url"]
 
         response = self.client.patch(
             f"/api/documents/{document.id}/",
@@ -112,6 +114,8 @@ class DocumentApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["file_name"], "neue-notiz.pdf")
+        self.assertIn("?v=", response.data["file_url"])
+        self.assertNotEqual(response.data["file_url"], old_file_url)
         document.refresh_from_db()
         self.assertTrue(document.file.name.endswith("neue-notiz.pdf"))
         self.assertTrue(storage.exists(document.file.name))
